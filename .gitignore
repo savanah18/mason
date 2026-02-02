@@ -28,7 +28,7 @@ certificates/
 data/
 
 # Rust build artifacts
-/target/
+*target/
 Cargo.lock
 **/*.rs.bk
 *.pdb
