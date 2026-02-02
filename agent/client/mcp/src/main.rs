@@ -1,3 +1,7 @@
+// NOTE: This binary will be deprecated in favor of the autonomous agent system.
+//       Use `cargo run --bin autonomous-agent` for the new goal-driven approach.
+//       This tool discovery binary is kept for backward compatibility.
+
 use serde::{Deserialize, Serialize};
 use colored::*;
 use chrono::Utc;

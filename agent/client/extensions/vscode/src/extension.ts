@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { randomUUID } from 'crypto';
 
 type ChatMessage = { id: number; sender: 'user' | 'assistant'; text: string };
 
@@ -11,15 +12,39 @@ const TRITON_MODEL_READY_ENDPOINT = `${TRITON_HTTP_URL}/v2/models/${TRITON_MODEL
 const MAX_MESSAGES_IN_UI = 100; // Limit chat display to prevent memory issues
 
 export function activate(context: vscode.ExtensionContext): void {
-  const startDisposable = vscode.commands.registerCommand('tritonAI.start', () => {
-    vscode.window.showInformationMessage('🚀 Triton AI Chat Ready - Generic AI assistant powered by Triton Inference Server is active!');
-  });
+  try {
+    console.log('[Triton AI] ✅ Extension activating...');
+    
+    // Show notification immediately to confirm extension is running
+    vscode.window.showInformationMessage('🚀 Triton AI Chat is starting...');
+    
+    const startDisposable = vscode.commands.registerCommand('tritonAI.start', () => {
+      console.log('[Triton AI] Start command executed');
+      vscode.window.showInformationMessage('🚀 Triton AI Chat Ready - Generic AI assistant powered by Triton Inference Server is active!');
+    });
 
-  const chatDisposable = vscode.commands.registerCommand('tritonAI.openChat', () => {
-    ChatPanel.createOrShow(context);
-  });
+    const chatDisposable = vscode.commands.registerCommand('tritonAI.openChat', () => {
+      console.log('[Triton AI] Open chat command executed');
+      ChatPanel.createOrShow(context);
+    });
 
-  context.subscriptions.push(startDisposable, chatDisposable);
+    context.subscriptions.push(startDisposable, chatDisposable);
+    
+    // Auto-open chat on startup
+    console.log('[Triton AI] Opening chat panel automatically...');
+    setTimeout(() => {
+      try {
+        ChatPanel.createOrShow(context);
+        console.log('[Triton AI] ✅ Chat panel created successfully');
+      } catch (err) {
+        console.error('[Triton AI] ❌ Error creating chat panel:', err);
+        vscode.window.showErrorMessage(`Triton AI Error: ${err}`);
+      }
+    }, 100);
+  } catch (error) {
+    console.error('[Triton AI] ❌ Activation error:', error);
+    vscode.window.showErrorMessage(`Triton AI activation failed: ${error}`);
+  }
 }
 
 export function deactivate(): void {
@@ -33,28 +58,45 @@ class ChatPanel {
     {
       id: 1,
       sender: 'assistant',
-      text: '🤖 Triton AI Chat Assistant\n\nHello! I\'m a versatile AI assistant powered by Triton Inference Server with Qwen3-VL-8B-Instruct. I support:\n• Real-time text generation (max 32 batch)\n• Embedding extraction and vectorization\n• Multimodal input (text + images)\n• Fast inference with response timing\n• Flexible model configuration\n\nWhat would you like to know or discuss?',
+      text: '🤖 Triton AI Chat Assistant\n\nHello! I\'m a versatile AI assistant powered by Triton Inference Server with Qwen3-VL-8B-Instruct. I support:\n• Real-time text generation (max 32 batch)\n• Embedding extraction and vectorization\n• Multimodal input (text + images)\n• Fast inference with response timing\n• Persistent KV cache across conversation\n• Flexible model configuration\n\nWhat would you like to know or discuss?',
     },
   ];
   private nextId = 2;
   private serverStatus = 'Checking...';
   private modelLoaded = false;
   private isLoading = false;
+  private sessionId: string; // Session ID for KV cache persistence
 
   private constructor(private readonly context: vscode.ExtensionContext) {
-    this.panel = vscode.window.createWebviewPanel(
-      'tritonAIChat',
-      'Triton AI Chat',
-      vscode.ViewColumn.Beside,
-      {
-        enableScripts: true,
-      },
-    );
+    try {
+      // Generate session ID for this chat instance
+      this.sessionId = this.generateSessionId();
+      console.log(`[Triton AI] Creating webview panel with session: ${this.sessionId}...`);
+      this.panel = vscode.window.createWebviewPanel(
+        'tritonAIChat',
+        'Triton AI Chat',
+        vscode.ViewColumn.Beside,
+        {
+          enableScripts: true,
+        },
+      );
+      console.log('[Triton AI] Webview panel created');
 
-    this.panel.onDidDispose(() => this.dispose(), null, this.context.subscriptions);
-    this.panel.webview.onDidReceiveMessage(msg => this.onMessage(msg));
-    this.panel.webview.html = this.renderHtml();
-    this.checkServerHealth();
+      this.panel.onDidDispose(() => this.dispose(), null, this.context.subscriptions);
+      this.panel.webview.onDidReceiveMessage(msg => this.onMessage(msg));
+      console.log('[Triton AI] Setting webview HTML...');
+      this.panel.webview.html = this.renderHtml();
+      console.log('[Triton AI] HTML set, sending initial state...');
+      // Send initial state to webview immediately
+      this.pushState();
+      // Then check server health
+      console.log('[Triton AI] Checking server health...');
+      this.checkServerHealth();
+      console.log('[Triton AI] ChatPanel constructor complete');
+    } catch (err) {
+      console.error('[Triton AI] Error in ChatPanel constructor:', err);
+      throw err;
+    }
   }
 
   static createOrShow(context: vscode.ExtensionContext): void {
@@ -105,6 +147,7 @@ class ChatPanel {
   }
 
   private async onMessage(message: { type: string; text?: string; action?: string }): Promise<void> {
+    console.log('[Triton AI] Webview message received:', message);
     if (message.type === 'send' && message.text) {
       const userMsg: ChatMessage = {
         id: this.nextId++,
@@ -114,6 +157,7 @@ class ChatPanel {
       if (!userMsg.text) {
         return;
       }
+      console.log('[Triton AI] User message:', userMsg.text);
       this.messages.push(userMsg);
       this.pushState(); // Show user message immediately
 
@@ -137,7 +181,7 @@ class ChatPanel {
         const startTime = Date.now();
         console.log('[Triton AI] Sending request to Triton:', userMsg.text);
         
-        // Build Triton inference request with mode parameter
+        // Build Triton inference request with mode and session_id parameters
         const tritonRequest = {
           inputs: [
             {
@@ -151,6 +195,12 @@ class ChatPanel {
               shape: [1, 1],
               datatype: 'BYTES',
               data: ['generate']  // Use 'generate' for text generation, 'embed' for embeddings
+            },
+            {
+              name: 'session_id',
+              shape: [1, 1],
+              datatype: 'BYTES',
+              data: [this.sessionId]  // Pass session ID for KV cache persistence
             }
           ],
           outputs: [
@@ -204,17 +254,25 @@ class ChatPanel {
       this.pushState();
     } else if (message.action === 'load-model') {
       await this.loadModel();
+      this.pushState();
     } else if (message.action === 'clear-chat') {
+      // Reset session ID when clearing chat to start fresh
+      this.sessionId = this.generateSessionId();
+      console.log(`[Triton AI] Chat cleared, new session: ${this.sessionId}`);
       this.messages = [
         {
           id: this.nextId++,
           sender: 'assistant',
-          text: 'Chat cleared.',
+          text: 'Chat cleared. New session started with fresh KV cache.',
         },
       ];
       this.pushState();
     } else if (message.action === 'check-health') {
+      console.log('[Triton AI] Checking server health...');
       await this.checkServerHealth();
+      console.log('[Triton AI] Health check complete:', this.serverStatus);
+      this.addMessage('assistant', `Status: ${this.serverStatus}`);
+      this.pushState();
     }
   }
 
@@ -224,6 +282,11 @@ class ChatPanel {
       sender,
       text,
     });
+  }
+  
+  private generateSessionId(): string {
+    // Use Node.js built-in crypto for UUID v4 generation
+    return randomUUID();
   }
 
   private renderHtml(): string {
@@ -264,7 +327,7 @@ class ChatPanel {
       <div class="header-status" id="status-text">Checking Triton server...</div>
     </div>
     <div class="controls">
-      <button onclick="checkHealth()" class="secondary" style="flex: 0 1 auto;">Check Status</button>
+      <button id="health-btn" class="secondary" style="flex: 0 1 auto;">Check Status</button>
     </div>
   </header>
   <main id="messages" aria-live="polite"></main>
@@ -272,7 +335,7 @@ class ChatPanel {
     <textarea id="chat-input" placeholder="Type a message and press Send..." style="min-height: 60px; max-height: 120px;"></textarea>
     <div class="button-group">
       <button type="submit" id="send-btn">Send</button>
-      <button type="button" onclick="clearChat()" class="secondary">Clear</button>
+      <button type="button" id="clear-btn" class="secondary">Clear</button>
     </div>
   </form>
   <script nonce="${nonce}">
@@ -282,12 +345,16 @@ class ChatPanel {
     const inputEl = document.getElementById('chat-input');
     const statusEl = document.getElementById('status-text');
     const sendBtn = document.getElementById('send-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const healthBtn = document.getElementById('health-btn');
+    
+    console.log('Button elements:', { sendBtn, clearBtn, healthBtn });
 
     const render = (messages) => {
       messagesEl.innerHTML = '';
       messages.forEach(msg => {
         const div = document.createElement('div');
-        div.className = \`bubble \${msg.sender}\`;
+        div.className = 'bubble ' + msg.sender;
         div.textContent = msg.text;
         messagesEl.appendChild(div);
       });
@@ -316,17 +383,15 @@ class ChatPanel {
       vscode.postMessage({ type: 'send', text });
     });
 
-    function loadModel() {
-      vscode.postMessage({ action: 'load-model' });
-    }
-
-    function checkHealth() {
+    healthBtn.addEventListener('click', () => {
+      console.log('Health button clicked');
       vscode.postMessage({ action: 'check-health' });
-    }
+    });
 
-    function clearChat() {
+    clearBtn.addEventListener('click', () => {
+      console.log('Clear button clicked');
       vscode.postMessage({ action: 'clear-chat' });
-    }
+    });
   </script>
 </body>
 </html>`;

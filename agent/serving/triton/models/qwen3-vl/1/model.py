@@ -53,12 +53,14 @@ class TritonPythonModel:
             attention_impl=attention_impl
         )
         
-        # Initialize conversation history (per-instance state)
-        self.conversation_history: List[Dict[str, Any]] = []
+        # Initialize session-based state
+        self.sessions = {}  # session_id -> {history, kv_cache, last_access}
         self.max_history = int(os.getenv("MAX_HISTORY", "5"))
         self.max_new_tokens = int(os.getenv("MAX_NEW_TOKENS", "512"))
         self.temperature = float(os.getenv("TEMPERATURE", "0.7"))
         self.top_p = float(os.getenv("TOP_P", "0.9"))
+        self.session_timeout = int(os.getenv("SESSION_TIMEOUT", "3600"))  # 1 hour
+        self.max_sessions = int(os.getenv("MAX_SESSIONS", "100"))
         
         print("=" * 50)
         print("✓ Model initialized successfully!")
@@ -105,11 +107,15 @@ class TritonPythonModel:
                 message = pb_utils.get_input_tensor_by_name(request, "message")
                 image_input = pb_utils.get_input_tensor_by_name(request, "image")
                 mode_input = pb_utils.get_input_tensor_by_name(request, "mode")
+                session_id_input = pb_utils.get_input_tensor_by_name(request, "session_id")
                 
                 # Get batch size from message tensor shape
                 msg_array = message.as_numpy()
                 batch_size = msg_array.shape[0]
                 print(f"[Triton] Processing batch of {batch_size} requests")
+                
+                # Clean expired sessions
+                self._cleanup_sessions()
                 
                 # Extract mode (same for all items in batch)
                 mode = "generate"
@@ -117,6 +123,15 @@ class TritonPythonModel:
                     mode_array = mode_input.as_numpy()
                     mode_bytes = mode_array[0, 0] if mode_array.ndim > 1 else mode_array[0]
                     mode = mode_bytes.decode('utf-8') if isinstance(mode_bytes, bytes) else mode_bytes
+                
+                # Extract session_id (same for all items in batch)
+                session_id = None
+                if session_id_input is not None:
+                    sid_array = session_id_input.as_numpy()
+                    sid_bytes = sid_array[0, 0] if sid_array.ndim > 1 else sid_array[0]
+                    session_id = sid_bytes.decode('utf-8') if isinstance(sid_bytes, bytes) else sid_bytes
+                    if session_id:
+                        print(f"[Triton] Using session: {session_id}")
                 
                 # Process each item in the batch
                 batch_responses = []
@@ -153,7 +168,7 @@ class TritonPythonModel:
                     else:
                         # Generation mode (default)
                         print(f"[Triton] [{i+1}/{batch_size}] Starting inference for: {message_str[:50]}...")
-                        response_text = self._inference(message_str, image_base64)
+                        response_text = self._inference(message_str, image_base64, session_id)
                         response_time = time.time() - start_time
                         print(f"[Triton] [{i+1}/{batch_size}] Inference completed in {response_time:.2f}s")
                         
@@ -276,8 +291,8 @@ class TritonPythonModel:
         
         return embedding
     
-    def _inference(self, message: str, image_base64: Optional[str]) -> str:
-        """Perform inference on the message."""
+    def _inference(self, message: str, image_base64: Optional[str], session_id: Optional[str] = None) -> str:
+        """Perform inference on the message with session-based KV cache."""
         inference_start = time.time()
         if not message.strip():
             return "Error: Message cannot be empty"
@@ -298,22 +313,40 @@ class TritonPythonModel:
             except Exception as e:
                 print(f"Warning: Failed to decode image: {str(e)}")
         
-        # Add user message to history
-        self.conversation_history.append({
+        # Get or create session
+        import uuid
+        if not session_id:
+            session_id = str(uuid.uuid4())
+            print(f"[Triton] Created new session: {session_id}")
+        
+        if session_id not in self.sessions:
+            self.sessions[session_id] = {
+                "history": [],
+                "kv_cache": None,
+                "last_access": time.time()
+            }
+            print(f"[Triton] Initialized session {session_id}")
+        
+        session = self.sessions[session_id]
+        session["last_access"] = time.time()
+        
+        # Add user message to session history
+        session["history"].append({
             "role": "user",
             "content": content
         })
         
         # Slide context window
-        if len(self.conversation_history) > self.max_history:
-            self.conversation_history = self.conversation_history[-self.max_history:]
-            print(f"[Triton] Trimmed history to {len(self.conversation_history)} messages")
+        if len(session["history"]) > self.max_history:
+            session["history"] = session["history"][-self.max_history:]
+            session["kv_cache"] = None  # Invalidate cache when trimming
+            print(f"[Triton] Trimmed history to {len(session['history'])} messages")
         
         # Prepare inputs
         try:
             tokenize_start = time.time()
             inputs = self.processor.apply_chat_template(
-                self.conversation_history,
+                session["history"],
                 tokenize=True,
                 add_generation_prompt=True,
                 return_dict=True,
@@ -321,24 +354,36 @@ class TritonPythonModel:
             )
             tokenize_time = time.time() - tokenize_start
             input_tokens = inputs['input_ids'].shape[1]
-            print(f"[Triton] Tokenization: {tokenize_time:.2f}s | Input tokens: {input_tokens}")
+            
+            cache_status = "cached" if session["kv_cache"] is not None else "no cache"
+            print(f"[Triton] Tokenization: {tokenize_time:.2f}s | Input tokens: {input_tokens} | {cache_status}")
         except Exception as e:
             print(f"Error preparing inputs: {str(e)}")
             return f"Error preparing inputs: {str(e)}"
         
         inputs = inputs.to(self.model.device)
         
-        # Inference
+        # Inference with KV cache
         try:
             gen_start = time.time()
             with torch.no_grad():
-                generated_ids = self.model.generate(
+                outputs = self.model.generate(
                     **inputs,
+                    past_key_values=session["kv_cache"],
                     max_new_tokens=self.max_new_tokens,
                     do_sample=True,
                     temperature=self.temperature,
-                    top_p=self.top_p
+                    top_p=self.top_p,
+                    use_cache=True,
+                    return_dict_in_generate=True
                 )
+                generated_ids = outputs.sequences
+                
+                # Save KV cache for next call
+                if hasattr(outputs, 'past_key_values') and outputs.past_key_values is not None:
+                    session["kv_cache"] = outputs.past_key_values
+                    print(f"[Triton] KV cache saved for session {session_id}")
+            
             gen_time = time.time() - gen_start
             output_tokens = generated_ids.shape[1] - input_tokens
             print(f"[Triton] Generation: {gen_time:.2f}s | Output tokens: {output_tokens} | Speed: {output_tokens/gen_time:.1f} tok/s")
@@ -359,13 +404,37 @@ class TritonPythonModel:
             print(f"Error during generation: {str(e)}")
             return f"Error during generation: {str(e)}"
         
-        # Add assistant response to history
-        self.conversation_history.append({
+        # Add assistant response to session history
+        session["history"].append({
             "role": "assistant",
             "content": [{"type": "text", "text": response}]
         })
         
         return response
+    
+    def _cleanup_sessions(self):
+        """Remove expired sessions to prevent memory leaks."""
+        current_time = time.time()
+        expired = []
+        
+        for session_id, session in self.sessions.items():
+            if current_time - session["last_access"] > self.session_timeout:
+                expired.append(session_id)
+        
+        for session_id in expired:
+            del self.sessions[session_id]
+            print(f"[Triton] Cleaned expired session: {session_id}")
+        
+        # Enforce max sessions limit (LRU eviction)
+        if len(self.sessions) > self.max_sessions:
+            sorted_sessions = sorted(
+                self.sessions.items(),
+                key=lambda x: x[1]["last_access"]
+            )
+            to_remove = len(self.sessions) - self.max_sessions
+            for session_id, _ in sorted_sessions[:to_remove]:
+                del self.sessions[session_id]
+                print(f"[Triton] Evicted session (LRU): {session_id}")
     
     def finalize(self):
         """Cleanup when Triton shuts down."""
@@ -374,4 +443,5 @@ class TritonPythonModel:
             del self.model
         if hasattr(self, 'processor'):
             del self.processor
-        self.conversation_history.clear()
+        if hasattr(self, 'sessions'):
+            self.sessions.clear()
