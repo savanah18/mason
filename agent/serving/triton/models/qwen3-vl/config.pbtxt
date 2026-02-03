@@ -19,6 +19,12 @@ input [
     data_type: TYPE_STRING
     dims: [ -1 ]
     optional: true
+  },
+  {
+    name: "session_id"
+    data_type: TYPE_STRING
+    dims: [ -1 ]
+    optional: true
   }
 ]
 

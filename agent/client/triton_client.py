@@ -9,6 +9,7 @@ from typing import Optional, Tuple
 import base64
 import numpy as np
 from pathlib import Path
+import uuid
 
 
 class TritonClient:
@@ -18,7 +19,8 @@ class TritonClient:
         self,
         triton_url: str = "localhost:8001",
         use_grpc: bool = False,
-        model_name: str = "qwen3-vl"
+        model_name: str = "qwen3-vl",
+        session_id: Optional[str] = None
     ):
         """
         Initialize Triton client.
@@ -27,10 +29,12 @@ class TritonClient:
             triton_url: Triton server URL (host:port)
             use_grpc: Use gRPC protocol instead of HTTP
             model_name: Model name in Triton repository
+            session_id: Optional session ID for KV cache persistence
         """
         self.triton_url = triton_url
         self.model_name = model_name
         self.use_grpc = use_grpc
+        self.session_id = session_id or str(uuid.uuid4())
         
         if use_grpc:
             self.client = grpcclient.InferenceServerClient(triton_url)
@@ -39,6 +43,7 @@ class TritonClient:
         
         print(f"Connected to Triton at {triton_url}")
         print(f"Model: {model_name}")
+        print(f"Session ID: {self.session_id}")
     
     @staticmethod
     def debug_infer_result(result):
@@ -127,6 +132,11 @@ class TritonClient:
         mode_input = InferInput("mode", [1, 1], "BYTES")
         mode_input.set_data_from_numpy(np.array([[mode.encode('utf-8')]], dtype=object))
         inputs.append(mode_input)
+        
+        # Add session_id input for KV cache
+        session_input = InferInput("session_id", [1, 1], "BYTES")
+        session_input.set_data_from_numpy(np.array([[self.session_id.encode('utf-8')]], dtype=object))
+        inputs.append(session_input)
         
         # Request inference
         try:
@@ -219,6 +229,13 @@ class TritonClient:
         mode_input.set_data_from_numpy(mode_array)
         inputs.append(mode_input)
         
+        # Add session_id input for KV cache (same session for all in batch)
+        session_bytes = self.session_id.encode('utf-8')
+        session_array = np.array([[session_bytes]] * batch_size_actual, dtype=object)
+        session_input = InferInput("session_id", [batch_size_actual, 1], "BYTES")
+        session_input.set_data_from_numpy(session_array)
+        inputs.append(session_input)
+        
         # Request batch inference
         try:
             response = self.client.infer(
@@ -262,15 +279,15 @@ class TritonClient:
 class TritonHttpClient(TritonClient):
     """HTTP-based Triton client."""
     
-    def __init__(self, url: str = "localhost:8001", model_name: str = "qwen3-vl"):
-        super().__init__(url, use_grpc=False, model_name=model_name)
+    def __init__(self, url: str = "localhost:8001", model_name: str = "qwen3-vl", session_id: Optional[str] = None):
+        super().__init__(url, use_grpc=False, model_name=model_name, session_id=session_id)
 
 
 class TritonGrpcClient(TritonClient):
     """gRPC-based Triton client (faster for low-latency)."""
     
-    def __init__(self, url: str = "localhost:8001", model_name: str = "qwen3-vl"):
-        super().__init__(url, use_grpc=True, model_name=model_name)
+    def __init__(self, url: str = "localhost:8001", model_name: str = "qwen3-vl", session_id: Optional[str] = None):
+        super().__init__(url, use_grpc=True, model_name=model_name, session_id=session_id)
 
 
 if __name__ == "__main__":

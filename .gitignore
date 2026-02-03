@@ -10,6 +10,7 @@ env/
 # Logs
 *.log
 logs/
+test_summaries/
 
 # Certificates and keys
 *.pem
@@ -28,7 +29,7 @@ certificates/
 data/
 
 # Rust build artifacts
-/target/
+*target/
 Cargo.lock
 **/*.rs.bk
 *.pdb

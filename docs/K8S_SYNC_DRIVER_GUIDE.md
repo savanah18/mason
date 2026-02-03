@@ -365,6 +365,6 @@ tools/k8s2vector/sync-driver/
 
 ## See Also
 
-- [Triton Integration Guide](../TRITON_GUIDE.md) - Embedding service
-- [RAG Integration Plan](../RAG_INTEGRATION_PLAN.md) - Full RAG system
+- [Triton Integration Guide](TRITON_GUIDE.md) - Embedding service
+- [RAG Integration Plan](RAG_INTEGRATION_PLAN.md) - Full RAG system
 - [Kubernetes API](https://kubernetes.io/docs/reference/) - K8s resources

@@ -1,15 +1,47 @@
 [package]
-name = "mcp-tool-discovery"
-version = "0.2.0"
+name = "mcp-autonomous-agent"
+version = "0.3.0"
 edition = "2021"
 
+[[bin]]
+name = "mcp-tool-discovery"
+path = "src/main.rs"
+
+[[bin]]
+name = "agent"
+path = "src/bin/agent.rs"
+
+[lib]
+name = "mcp_agent"
+path = "src/lib.rs"
+
 [dependencies]
-rmcp = { version = "0.14.0", features = ["server", "client", "transport-io"] }
-tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "time"] }
+# Async runtime
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "time", "fs"] }
+
+# Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+# HTTP client
 reqwest = { version = "0.12", features = ["json", "blocking"] }
+
+# CLI & Display
 colored = "2.1"
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
 anyhow = "1.0"
+thiserror = "1.0"
+
+# UUID generation
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# Regex for parsing
 regex = "1.10"
+
+# Optional: MCP protocol (if needed later)
+# rmcp = { version = "0.14.0", features = ["server", "client", "transport-io"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
