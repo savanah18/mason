@@ -60,9 +60,9 @@ Qwen3-VL (int4, 5-6GB VRAM)
 | **System Design** | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | **Embeddings (Local vs Triton)** | [docs/VLM2VEC_EMBEDDING_GUIDE.md](docs/VLM2VEC_EMBEDDING_GUIDE.md) |
 | **K8s Real-Time Sync** | [docs/K8S_SYNC_DRIVER_GUIDE.md](docs/K8S_SYNC_DRIVER_GUIDE.md) |
-| **Triton Server Deployment** | [TRITON_GUIDE.md](TRITON_GUIDE.md) |
-| **Performance Optimization** | [TRITON_PERFORMANCE.md](TRITON_PERFORMANCE.md) |
-| **RAG Integration** | [RAG_INTEGRATION_PLAN.md](RAG_INTEGRATION_PLAN.md) |
+| **Triton Server Deployment** | [TRITON_GUIDE.md](docs/TRITON_GUIDE.md) |
+| **Performance Optimization** | [TRITON_PERFORMANCE.md](docs/TRITON_PERFORMANCE.md) |
+| **RAG Integration** | [RAG_INTEGRATION_PLAN.md](docs/RAG_INTEGRATION_PLAN.md) |
 | **Version History** | [CHANGELOG.md](CHANGELOG.md) |
 
 ---

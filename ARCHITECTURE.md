@@ -452,6 +452,6 @@ Kubernetes Cluster
 ## Next Steps
 
 - **Installation**: See [GETTING_STARTED.md](GETTING_STARTED.md)
-- **Performance**: Read [TRITON_PERFORMANCE.md](TRITON_PERFORMANCE.md)
-- **RAG Integration**: Check [RAG_INTEGRATION_PLAN.md](RAG_INTEGRATION_PLAN.md)
+- **Performance**: Read [TRITON_PERFORMANCE.md](docs/TRITON_PERFORMANCE.md)
+- **RAG Integration**: Check [RAG_INTEGRATION_PLAN.md](docs/RAG_INTEGRATION_PLAN.md)
 - **K8s Sync**: Explore [docs/K8S_SYNC_DRIVER_GUIDE.md](docs/K8S_SYNC_DRIVER_GUIDE.md)

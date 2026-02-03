@@ -108,6 +108,6 @@ The critical breakthrough was discovering that MCP maintains session state via H
 
 For issues or questions:
 1. Check [GETTING_STARTED.md](GETTING_STARTED.md) troubleshooting
-2. Review [MCP_INTEGRATION_GUIDE.md](MCP_INTEGRATION_GUIDE.md) for tool-specific help
+2. Review [MCP_INTEGRATION_GUIDE.md](docs/MCP_INTEGRATION_GUIDE.md) for tool-specific help
 3. Check [CHANGELOG.md](CHANGELOG.md) for recent fixes
 4. Review logs in `logs/` directory

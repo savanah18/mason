@@ -294,8 +294,8 @@ docker-compose down
 ## Next Steps
 
 1. **Learn the System**: Read [ARCHITECTURE.md](ARCHITECTURE.md)
-2. **Configure RAG**: See [RAG_INTEGRATION_PLAN.md](RAG_INTEGRATION_PLAN.md)
-3. **Optimize Performance**: Read [TRITON_PERFORMANCE.md](TRITON_PERFORMANCE.md)
+2. **Configure RAG**: See [RAG_INTEGRATION_PLAN.md](docs/RAG_INTEGRATION_PLAN.md)
+3. **Optimize Performance**: Read [TRITON_PERFORMANCE.md](docs/TRITON_PERFORMANCE.md)
 4. **Embeddings**: Check [docs/VLM2VEC_EMBEDDING_GUIDE.md](docs/VLM2VEC_EMBEDDING_GUIDE.md)
 5. **K8s Sync**: Explore [docs/K8S_SYNC_DRIVER_GUIDE.md](docs/K8S_SYNC_DRIVER_GUIDE.md)
 
