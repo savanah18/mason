@@ -1,0 +1,52 @@
+# PyTorch and CUDA Support
+torch>=2.1.0
+torchvision>=0.16.0
+torchaudio>=2.1.0
+
+# Transformer Models and Quantization
+transformers>=4.37.0
+bitsandbytes>=0.41.0
+accelerate>=0.26.0
+peft>=0.7.0
+
+# ONNX Support
+onnx>=1.15.0
+onnxruntime>=1.17.0
+onnxruntime-gpu>=1.17.0
+skl2onnx>=1.17.0
+onnxruntime-tools>=1.7.0
+
+# TensorRT
+# Note: TensorRT requires manual installation or nvidia-pytrt package
+# tensorrt>=8.6.1
+
+# Optimization Libraries
+flash-attn>=2.3.0
+optimum>=1.16.0
+
+# Additional Performance Libraries (Optional)
+vllm>=0.3.0
+
+# Utilities
+numpy>=1.24.0
+scipy>=1.11.0
+scikit-learn>=1.3.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+tqdm>=4.66.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+loguru>=0.7.0
+psutil>=5.9.0
+
+# Benchmarking and Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-benchmark>=4.0.0
+memory-profiler>=0.61.0
+
+# Development Tools
+black>=23.10.0
+isort>=5.12.0
+flake8>=6.1.0
