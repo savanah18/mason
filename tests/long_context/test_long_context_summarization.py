@@ -3,6 +3,12 @@
 Test and demonstration script for Triton summarization client.
 Tests long-context capabilities of Qwen3 with a complex epic document.
 
+⚠️  KNOWN LIMITATIONS:
+    - GPU memory: RTX 5060 TI (~16GB) maxes out at 100% during long-context summarization
+    - Performance test with 3+ iterations will timeout due to GPU memory pressure
+    - Each summarization of full epic (4,921 tokens) takes ~3-4 seconds
+    - Recommended: Use --truncate-doc flag to reduce document size for testing
+    
 Usage:
     python test_long_context_summarization.py [--grpc] [--host localhost] [--port 8001]
     
@@ -13,6 +19,7 @@ Usage:
         --port      Triton server port (default: 8000 for HTTP, 8001 for gRPC)
         --skip-health  Skip health check
         --output-dir   Directory to save results (default: ./test_summaries)
+        --timeout   Request timeout in seconds (default: 300.0)
 """
 
 import sys
@@ -92,6 +99,12 @@ Examples:
         default='1',
         help='Model version (default: 1)'
     )
+    parser.add_argument(
+        '--timeout',
+        type=float,
+        default=300.0,
+        help='Request timeout in seconds (default: 300.0)'
+    )
     
     return parser.parse_args()
 
@@ -117,13 +130,15 @@ def create_client(args) -> TritonSummarizationClient:
         client = TritonSummarizationGrpcClient(
             url=server_url,
             model_name=args.model,
-            model_version=args.version
+            model_version=args.version,
+            timeout=args.timeout
         )
     else:
         client = TritonSummarizationHttpClient(
             url=server_url,
             model_name=args.model,
-            model_version=args.version
+            model_version=args.version,
+            timeout=args.timeout
         )
     
     return client
@@ -159,7 +174,7 @@ def test_document_loading(client: TritonSummarizationClient):
     print("[2/5] Document Loading and Token Estimation")
     print("="*80)
     
-    epic_path = "docs/epic-kubernetes-distributed-system.md"
+    epic_path = "./epic-kubernetes-distributed-system.md"
     
     try:
         document = client.load_document(epic_path)
@@ -260,16 +275,24 @@ Ignore implementation details but keep conceptual clarity."""
 
 
 def test_long_context_performance(client: TritonSummarizationClient, document: str, args):
-    """Test [5/5] - Long context performance analysis."""
+    """Test [5/5] - Long context performance analysis.
+    
+    ⚠️  GPU MEMORY LIMITATION:
+        - RTX 5060 TI will reach 100% utilization during this test
+        - Currently limited to 1 iteration to prevent OOM and timeout
+        - Full epic document (4,921 tokens) with 3 summarization levels per iteration
+        - To test with multiple iterations, truncate the document using --truncate-doc
+    """
     print("\n" + "="*80)
     print("[5/5] Long Context Performance Analysis")
     print("="*80)
-    print("Testing consistency and performance across multiple iterations...")
+    print("Testing consistency and performance across 1 iteration (GPU memory limited)...")
+    print("⚠️  GPU may reach 100% utilization during this test")
     
     try:
         analysis = client.analyze_long_context_performance(
             document,
-            iterations=3
+            iterations=1
         )
         
         return analysis
@@ -377,6 +400,12 @@ def main():
     print("Qwen3 Long Context Capabilities Test")
     print("Triton Inference Server Integration")
     print("="*80)
+    print()
+    print("⚠️  HARDWARE INFO:")
+    print("    - GPU: NVIDIA RTX 5060 TI (~8GB VRAM)")
+    print("    - Document: ~4,921 tokens (full epic)")
+    print("    - Limitation: GPU will max out at 100% during long-context processing")
+    print("    - Timeout risk: Multiple iterations may exceed GPU memory capacity")
     print()
     
     # Create client
