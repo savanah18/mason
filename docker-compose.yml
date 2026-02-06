@@ -1,5 +1,8 @@
 version: '3.9'
 
+x-global-args: 
+  HOST_HOST_MODEL_PATH: &host_model_path /root/workspace/lnd/aiops/vlm/Qwen/Qwen2.5-7B-Instruct
+
 services:
   # FastAPI Model Server (optional - keep for backward compatibility)
   fastapi-server:
@@ -42,7 +45,7 @@ services:
       context: ./agent/serving/triton/docker
       dockerfile: Dockerfile.triton
       args:
-        BUILD_MODE: ${BUILD_MODE:-dev}  # 'dev' or 'prod'
+        BUILD_MODE: ${BUILD_MODE:-prod-tensorrt-llm}  # 'dev' or 'prod-py' or 'prod-tensorrt-llm'
       additional_contexts:
         site-packages: /root/miniconda3/envs/aiops-py312/lib/python3.12/site-packages
     container_name: triton-ai-server
@@ -51,7 +54,7 @@ services:
       - "8001:8001"   # gRPC
       - "8002:8002"   # Metrics
     environment:
-      - MODEL_PATH=/root/workspace/lnd/aiops/vlm/Qwen/Qwen3-VL-8B-Instruct
+      - MODEL_PATH=/root/artifacts/Qwen/Qwen2.5-7B-Instruct
       - QUANTIZATION_TYPE=int4
       - ATTENTION_IMPL=flash_attention_2
       - MAX_HISTORY=5
@@ -61,9 +64,9 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     volumes:
-      - ./agent/serving/triton/models:/models:ro
-      - /root/workspace/lnd/aiops/vlm:/root/workspace/lnd/aiops/vlm:ro
-      - /root/miniconda3/envs/aiops-py312/lib/python3.12/site-packages:/tmp/site-packages/:ro
+      - /root/workspace/lnd/aiops/vlm/Qwen/Qwen2.5-7B-Instruct:/root/artifacts/Qwen/Qwen2.5-7B-Instruct:ro
+      # - ./agent/serving/triton/models/qwen3-vl:/models/qwen3-vl:ro # comment out this when running non-python deployments
+      - ./agent/serving/triton/models/qwen2.5-tensorrtllm:/models/qwen2.5-tensorrtllm:ro
     command: tritonserver --model-repository=/models --log-verbose=1
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/v2/health/ready"]

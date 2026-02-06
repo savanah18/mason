@@ -38,3 +38,7 @@ Cargo.lock
 tools_catalog_*.json
 tools_index_*.md
 tools_summary_*.yaml
+
+# All outputs ignoe
+*output/**
+*outputs/**

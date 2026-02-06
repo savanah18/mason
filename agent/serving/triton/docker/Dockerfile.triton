@@ -20,9 +20,9 @@ RUN pip install --upgrade setuptools wheel
 COPY --from=site-packages . /usr/local/lib/python3.12/dist-packages/
 
 # ============================================
-# Stage 2: Production - install via pip
+# Stage 2: Production - install via pip and python backend
 # ============================================
-FROM nvcr.io/nvidia/tritonserver:25.12-py3 AS prod-stage
+FROM nvcr.io/nvidia/tritonserver:25.12-py3 AS prod-py-stage
 
 RUN apt-get update && apt-get install -y \
     python3-pip \
@@ -37,20 +37,12 @@ RUN pip install --upgrade pip setuptools wheel
 RUN pip install torch==2.0.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 RUN pip install transformers>=4.57.0 accelerate>=1.12.0 bitsandbytes>=0.49.0 safetensors>=0.7.0
 
-# Install vLLM (optional, for high-performance inference)
-RUN pip install vllm>=0.6.0
-
 # Install additional ML packages
 RUN pip install \
     pillow>=12.0.0 \
     requests>=2.32.0 \
     pydantic>=2.12.0 \
     numpy>=2.4.0
-
-# ============================================
-# Final Stage: Select based on BUILD_MODE
-# ============================================
-FROM ${BUILD_MODE}-stage AS final
 
 # Install Flash Attention 2 (latest version)
 # Requires: CUDA toolkit, ninja for faster builds
@@ -59,6 +51,17 @@ RUN apt-get update && apt-get install -y ninja-build && rm -rf /var/lib/apt/list
 # Install latest flash-attn from source
 RUN pip install packaging ninja
 RUN pip install flash-attn --no-build-isolation
+
+# ============================================
+# Stage 3: Triton with TensorRT LLM backend
+# ============================================
+FROM nvcr.io/nvidia/tritonserver:25.12-trtllm-python-py3 AS prod-tensorrt-llm-stage
+
+
+# ============================================
+# Final Stage: Select based on BUILD_MODE
+# ============================================
+FROM ${BUILD_MODE}-stage AS final
 
 # Create model directory
 RUN mkdir -p /models
@@ -70,4 +73,4 @@ WORKDIR /models
 EXPOSE 8000 8001 8002
 
 # Default command to start Triton server
-CMD ["tritonserver", "--model-repository=/models"]
+CMD ["tritonserver", "--model-repository=/models", "--verbose=1"]

@@ -1,0 +1,54 @@
+version: '3.9'
+
+x-global-args: 
+  HOST_MODEL_PATH: &host_model_path /root/workspace/lnd/aiops/vlm/Qwen/Qwen2.5-7B-Instruct
+  HOST_TENSORRT_ENGINE_PATH: &host_tensort_engine_path /root/workspace/lnd/aiops/apps/newbie-app/agent/serving/triton/models/qwen2.5-tensorrtllm/1
+  TENSORRT_ENGINE_PATH: &tensort_engine_path /app/tensorrt_llm/models/qwen2.5-tensorrtllm/1
+  MODEL_PATH: &model_path /app/tensorrt_llm/models/Qwen2.5-7B-Instruct
+  TENSORRT_LLM_CKPT: &tensorrt_llm_ckpt /app/tensorrt_llm/src/outputs/qwen-2.5-7b-fp16
+  QUANTIZATION_TYPE: &quant_type int4
+  DTYPE: &dtype float16
+
+x-common-env: &common-env
+  MODEL_PATH: *model_path
+  DTYPE: *dtype
+  TENSORRT_LLM_CKPT: *tensorrt_llm_ckpt
+  QUANTIZATION_TYPE: *quant_type
+  TENSORRT_ENGINE_PATH: *tensort_engine_path
+  TP_SIZE: 1
+  MAX_BATCH_SIZE: 8
+  MAX_INPUT_LENGTH: 2048
+  MAX_OUTPUT_LENGTH: 1024
+
+
+
+services:
+  tensort-llm-converter:
+    build:
+      context: .
+      dockerfile: Dockerfile.converter
+      additional_contexts:
+        site-packages: /root/miniconda3/envs/aiops-py312/lib/python3.12/site-packages
+    container_name: tensorrt-llm-converter
+    environment:
+      <<: *common-env
+    volumes:
+    - source: *host_model_path
+      target: *model_path
+      type: bind
+    - source: *host_tensort_engine_path
+      target: *tensort_engine_path
+      type: bind
+    - /root/workspace/lnd/aiops/apps/newbie-app/agent/serving/optimization/tensorrt_llm:/app/tensorrt_llm/src/
+    command: 
+    - /bin/bash
+    - -c 
+    - sleep 6000
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

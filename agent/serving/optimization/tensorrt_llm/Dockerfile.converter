@@ -1,0 +1,1 @@
+FROM nvcr.io/nvidia/tensorrt-llm/release:1.2.0rc6.post3
