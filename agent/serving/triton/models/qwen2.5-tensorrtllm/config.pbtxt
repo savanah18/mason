@@ -1,0 +1,127 @@
+name: "qwen2.5-tensorrtllm"
+backend: "tensorrtllm"
+max_batch_size: 8
+
+# Tokenizer directory (HuggingFace tokenizer files: tokenizer.json, vocab.json, merges.txt)
+parameters {
+  key: "tokenizer_dir"
+  value: { string_value: "/models/qwen2.5-tensorrtllm/tokenizer" }
+}
+
+
+parameters {
+  key: "guided_decoding_backend"
+  value: { string_value: "xgrammar" }
+}
+
+parameters {
+  key: "xgrammar_tokenizer_info_path"
+  value: { string_value: "/models/qwen2.5-tensorrtllm/tokenizer/xgrammar_tokenizer_info.json" }
+}
+
+# Transaction policy
+model_transaction_policy {
+  decoupled: True
+}
+
+# Model inputs
+input [
+  {
+    name: "text_input"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  },
+  {
+    name: "max_tokens"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+    optional: true
+  },
+  {
+    name: "temperature"
+    data_type: TYPE_FP32
+    dims: [ 1 ]
+    optional: true
+  },
+  {
+    name: "top_p"
+    data_type: TYPE_FP32
+    dims: [ 1 ]
+    optional: true
+  },
+  {
+    name: "stream"
+    data_type: TYPE_BOOL
+    dims: [ 1 ]
+    optional: true
+  }
+]
+
+# Model outputs
+output [
+  {
+    name: "text_output"
+    data_type: TYPE_STRING
+    dims: [ -1 ]
+  }
+]
+
+# GPU instance group
+instance_group [
+  {
+    count: 1
+    kind: KIND_GPU
+  }
+]
+
+# Model parameters
+parameters { key: "gpt_model_type" value: { string_value: "inflight_fused_batching" } }
+parameters { key: "batch_scheduler_policy" value: { string_value: "capacity" } }
+parameters { key: "max_queue_delay_microseconds" value: { string_value: "0" } }
+
+
+parameters {
+  key: "gpt_model_path"
+  value: { string_value: "/models/qwen2.5-tensorrtllm/1" }
+}
+
+parameters {
+  key: "batching_strategy"
+  value: { string_value: "inflight_fused_batching " }  
+}
+
+
+parameters {
+  key: "kv_cache_free_gpu_mem_fraction"
+  value: { string_value: "0.10" }
+}
+
+parameters {
+  key: "kv_cache_host_memory_bytes"
+  value: { string_value: "0" }
+}
+
+parameters {
+  key: "kv_cache_onboard_blocks"
+  value: { string_value: "true" }
+}
+
+parameters {
+  key: "max_tokens_in_paged_kv_cache"
+  value: { string_value: "64" }
+}
+
+parameters {
+  key: "max_num_sequences"
+  value: { string_value: "8" }
+}
+
+parameters {
+  key: "enable_trt_overlap"
+  value: { string_value: "true" }
+}
+
+parameters {
+  key: "normalize_log_probs"
+  value: { string_value: "true" }
+}

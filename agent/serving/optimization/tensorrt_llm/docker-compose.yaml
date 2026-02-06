@@ -1,13 +1,13 @@
 version: '3.9'
 
 x-global-args: 
-  HOST_MODEL_PATH: &host_model_path /root/workspace/lnd/aiops/vlm/Qwen/Qwen2.5-7B-Instruct
-  HOST_TENSORRT_ENGINE_PATH: &host_tensort_engine_path /root/workspace/lnd/aiops/apps/newbie-app/agent/serving/triton/models/qwen2.5-tensorrtllm/1
-  TENSORRT_ENGINE_PATH: &tensort_engine_path /app/tensorrt_llm/models/qwen2.5-tensorrtllm/1
-  MODEL_PATH: &model_path /app/tensorrt_llm/models/Qwen2.5-7B-Instruct
-  TENSORRT_LLM_CKPT: &tensorrt_llm_ckpt /app/tensorrt_llm/src/outputs/qwen-2.5-7b-fp16
-  QUANTIZATION_TYPE: &quant_type int4
-  DTYPE: &dtype float16
+  HOST_MODEL_PATH: &host_model_path ${HOST_MODEL_PATH:-/root/workspace/lnd/aiops/vlm/Qwen/Qwen2.5-7B-Instruct}
+  HOST_TENSORRT_ENGINE_PATH: &host_tensort_engine_path ${HOST_TENSORRT_ENGINE_PATH:-/root/workspace/lnd/aiops/apps/newbie-app/agent/serving/triton/models/qwen2.5-tensorrtllm/1}
+  TENSORRT_ENGINE_PATH: &tensort_engine_path ${TENSORRT_ENGINE_PATH:-/app/tensorrt_llm/models/qwen2.5-tensorrtllm/1}
+  MODEL_PATH: &model_path ${MODEL_PATH:-/app/tensorrt_llm/models/Qwen2.5-7B-Instruct}
+  TENSORRT_LLM_CKPT: &tensorrt_llm_ckpt ${TENSORRT_LLM_CKPT:-/app/tensorrt_llm/src/outputs/qwen-2.5-7b-fp16}
+  QUANTIZATION_TYPE: &quant_type ${QUANTIZATION_TYPE:-int4}
+  DTYPE: &dtype ${DTYPE:-float16}
 
 x-common-env: &common-env
   MODEL_PATH: *model_path
@@ -24,11 +24,12 @@ x-common-env: &common-env
 
 services:
   tensort-llm-converter:
-    build:
-      context: .
-      dockerfile: Dockerfile.converter
-      additional_contexts:
-        site-packages: /root/miniconda3/envs/aiops-py312/lib/python3.12/site-packages
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile.converter
+    #   additional_contexts:
+    #     site-packages: /root/miniconda3/envs/aiops-py312/lib/python3.12/site-packages
+    image: nvcr.io/nvidia/tensorrt-llm/release:1.2.0rc6.post3
     container_name: tensorrt-llm-converter
     environment:
       <<: *common-env
@@ -43,7 +44,7 @@ services:
     command: 
     - /bin/bash
     - -c 
-    - sleep 6000
+    - /app/tensorrt_llm/src/scripts/pipeline.sh
     gpus: all
     deploy:
       resources:
