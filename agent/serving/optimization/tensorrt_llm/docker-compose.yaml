@@ -64,7 +64,9 @@ services:
       target: /app/tensorrt_llm/models/qwen3/1
       type: bind
     - /root/workspace/lnd/aiops/apps/newbie-app/agent/serving/optimization/tensorrt_llm:/app/tensorrt_llm/src/
-    - /root/workspace/lnd/aiops/vlm/Qwen/Qwen3-4B-Thinking-2507/:/app/tensorrt_llm/tokenizer/:ro
+    - source: *host_model_path
+      target: /app/tensorrt_llm/tokenizer
+      type: bind
     command: 
     - /bin/bash
     - -c 

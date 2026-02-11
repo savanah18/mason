@@ -18,7 +18,6 @@ trtllm-build --checkpoint_dir ${TENSORRT_LLM_CKPT}\
         --gemm_plugin ${DTYPE}  \
         --remove_input_padding enable \
         --use_paged_context_fmha enable \
-        --paged_kv_cache true \
         --kv_cache_type paged \
         --max_batch_size 4 \
         --max_input_len 8192 \
