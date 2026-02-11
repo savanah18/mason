@@ -1,0 +1,83 @@
+version: '3.9'
+
+x-global-args: 
+  HOST_MODEL_PATH: &host_model_path ${HOST_MODEL_PATH:-/root/workspace/lnd/aiops/vlm/Qwen/Qwen2.5-7B-Instruct}
+  HOST_TENSORRT_ENGINE_PATH: &host_tensort_engine_path ${HOST_TENSORRT_ENGINE_PATH:-/root/workspace/lnd/aiops/apps/newbie-app/agent/serving/triton/models/qwen2.5-tensorrtllm/1}
+  TENSORRT_ENGINE_PATH: &tensort_engine_path ${TENSORRT_ENGINE_PATH:-/app/tensorrt_llm/models/qwen2.5-tensorrtllm/1}
+  MODEL_PATH: &model_path ${MODEL_PATH:-/app/tensorrt_llm/models/Qwen2.5-7B-Instruct}
+  TENSORRT_LLM_CKPT: &tensorrt_llm_ckpt ${TENSORRT_LLM_CKPT:-/app/tensorrt_llm/src/outputs/qwen-2.5-7b-fp16}
+  QUANTIZATION_TYPE: &quant_type ${QUANTIZATION_TYPE:-int4}
+  DTYPE: &dtype ${DTYPE:-float16}
+
+x-common-env: &common-env
+  MODEL_PATH: *model_path
+  DTYPE: *dtype
+  TENSORRT_LLM_CKPT: *tensorrt_llm_ckpt
+  QUANTIZATION_TYPE: *quant_type
+  TENSORRT_ENGINE_PATH: *tensort_engine_path
+  TP_SIZE: 1
+  MAX_BATCH_SIZE: 8
+  MAX_INPUT_LENGTH: 2048
+  MAX_OUTPUT_LENGTH: 1024
+
+
+
+services:
+  tensort-llm-converter:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile.converter
+    #   additional_contexts:
+    #     site-packages: /root/miniconda3/envs/aiops-py312/lib/python3.12/site-packages
+    image: nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc0
+    container_name: tensorrt-llm-converter
+    environment:
+      <<: *common-env
+    volumes:
+    - source: *host_model_path
+      target: *model_path
+      type: bind
+    - source: *host_tensort_engine_path
+      target: *tensort_engine_path
+      type: bind
+    - /root/workspace/lnd/aiops/apps/newbie-app/agent/serving/optimization/tensorrt_llm:/app/tensorrt_llm/src/
+    command: 
+    - /bin/bash
+    - -c 
+    #- sleep 6000
+    - /app/tensorrt_llm/src/scripts/pipeline.sh
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+  tensort-llm-server:
+    image: nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc0
+    container_name: tensorrt-llm-server
+    environment:
+      <<: *common-env
+    volumes:
+    - source: *host_tensort_engine_path
+      target: /app/tensorrt_llm/models/qwen3/1
+      type: bind
+    - /root/workspace/lnd/aiops/apps/newbie-app/agent/serving/optimization/tensorrt_llm:/app/tensorrt_llm/src/
+    - source: *host_model_path
+      target: /app/tensorrt_llm/tokenizer
+      type: bind
+    command: 
+    - /bin/bash
+    - -c 
+    - /app/tensorrt_llm/src/scripts/serve.sh
+    ports:
+      - "8001:8000"
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

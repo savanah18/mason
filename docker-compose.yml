@@ -1,5 +1,32 @@
 version: '3.9'
 
+x-serving-args: 
+  HOST_SERVING_MODEL_PATH: &host_serving_model_path ${HOST_SERVING_MODEL_PATH:-./agent/serving/triton/models/qwen2.5-tensorrtllm}
+  SERVICE_MODEL_PATH: &serving_model_path ${SERVICE_MODEL_PATH:-/models/qwen2.5-tensorrtllm}
+  HOST_MODEL_CKPT: &host_model_ckpt ${HOST_MODEL_CKPT:-/root/workspace/lnd/aiops/vlm/Qwen/Qwen2.5-7B-Instruct}
+  MODEL_CKPT: &model_ckpt ${MODEL_CKPT:-/app/tensorrt_llm/models/Qwen2.5-7B-Instruct}
+
+x-triton-backend-env: &triton-python-backend-env
+  MODEL_PATH: /root/artifacts/Qwen/Qwen2.5-7B-Instruct
+  QUANTIZATION_TYPE: ${QUANTIZATION_TYPE}
+  ATTENTION_IMPL: flash_attention_2
+  MAX_HISTORY: 5
+  MAX_NEW_TOKENS: 512
+  TEMPERATURE: 0.7
+  TOP_P: 0.9
+  NVIDIA_VISIBLE_DEVICES: all
+  NVIDIA_DRIVER_CAPABILITIES: compute,utility
+
+
+x-gpu-resources: &gpu-resources
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: 1
+            capabilities: [gpu]
+
 services:
   # FastAPI Model Server (optional - keep for backward compatibility)
   fastapi-server:
@@ -36,35 +63,59 @@ services:
     networks:
       - triton-ai-network
 
+  # Development TensorRT-LLM Converter Service
+  # Use this instead of triton if there is no existing supported triton image for your model
+  tensort-llm-server:
+    image: nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc0
+    container_name: tensorrt-llm-server
+    environment:
+      <<: *common-env
+    volumes:
+    - source: *host_tensort_engine_path
+      target: /app/tensorrt_llm/models/qwen3/1
+      type: bind
+    - /root/workspace/lnd/aiops/apps/newbie-app/agent/serving/optimization/tensorrt_llm:/app/tensorrt_llm/src/
+    - source: *host_model_path
+      target: /app/tensorrt_llm/tokenizer
+      type: bind
+    command: 
+    - /bin/bash
+    - -c 
+    - /app/tensorrt_llm/src/scripts/serve.sh
+    ports:
+      - "8001:8000"
+    gpus: all
+    <<: *gpu-resources
+
   # Triton Inference Server
   triton-server:
     build:
       context: ./agent/serving/triton/docker
       dockerfile: Dockerfile.triton
       args:
-        BUILD_MODE: ${BUILD_MODE:-dev}  # 'dev' or 'prod'
+        BUILD_MODE: ${BUILD_MODE:-prod-tensorrt-llm}  # 'dev' or 'prod-py' or 'prod-tensorrt-llm'
       additional_contexts:
         site-packages: /root/miniconda3/envs/aiops-py312/lib/python3.12/site-packages
+    image: triton-ai-server:${BUILD_MODE:-prod-tensorrt-llm}
     container_name: triton-ai-server
     ports:
       - "8000:8000"   # HTTP
       - "8001:8001"   # gRPC
       - "8002:8002"   # Metrics
     environment:
-      - MODEL_PATH=/root/workspace/lnd/aiops/vlm/Qwen/Qwen3-VL-8B-Instruct
-      - QUANTIZATION_TYPE=int4
-      - ATTENTION_IMPL=flash_attention_2
-      - MAX_HISTORY=5
-      - MAX_NEW_TOKENS=512
-      - TEMPERATURE=0.7
-      - TOP_P=0.9
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      <<: *triton-python-backend-env
     volumes:
-      - ./agent/serving/triton/models:/models:ro
-      - /root/workspace/lnd/aiops/vlm:/root/workspace/lnd/aiops/vlm:ro
-      - /root/miniconda3/envs/aiops-py312/lib/python3.12/site-packages:/tmp/site-packages/:ro
-    command: tritonserver --model-repository=/models --log-verbose=1
+      - source: *host_serving_model_path
+        target: *serving_model_path
+        type: bind
+      - source: *host_model_ckpt
+        target: *model_ckpt
+        type: bind
+      #- /root/workspace/lnd/aiops/vlm/Qwen/Qwen2.5-7B-Instruct:/root/artifacts/Qwen/Qwen2.5-7B-Instruct:ro
+      #- ./agent/serving/triton/models/qwen3-vl:/models/qwen3-vl:ro # comment out this when running non-python deployments/
+      #- ./agent/serving/triton/models/qwen2.5-tensorrtllm:/models/qwen2.5-tensorrtllm:ro
+    #command: tritonserver --model-repository=/models --log-verbose=1
+    command: sleep 6000
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/v2/health/ready"]
       interval: 10s
@@ -72,13 +123,7 @@ services:
       retries: 3
       start_period: 30s
     gpus: all
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    <<: *gpu-resources
     networks:
       - triton-ai-network
 
