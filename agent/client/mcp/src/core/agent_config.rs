@@ -6,8 +6,8 @@ pub struct AgentConfig {
     /// MCP server base URL
     pub mcp_base_url: String,
     
-    /// Triton inference server URL
-    pub triton_url: String,
+    /// LLM API URL (OpenAI-compatible)
+    pub llm_api_url: String,
     
     /// Qdrant vector database URL
     pub qdrant_url: String,
@@ -73,7 +73,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             mcp_base_url: "http://localhost:8080".to_string(),
-            triton_url: "http://localhost:8000".to_string(),
+            llm_api_url: "http://localhost:8000".to_string(),
             qdrant_url: "http://localhost:6333".to_string(),
             default_max_iterations: default_max_iterations(),
             default_timeout_seconds: default_timeout(),
@@ -93,7 +93,7 @@ impl AgentConfig {
         Self {
             mcp_base_url: std::env::var("MCP_BASE_URL")
                 .unwrap_or_else(|_| "http://localhost:8080".to_string()),
-            triton_url: std::env::var("TRITON_URL")
+            llm_api_url: std::env::var("LLM_API_URL")
                 .unwrap_or_else(|_| "http://localhost:8000".to_string()),
             qdrant_url: std::env::var("QDRANT_URL")
                 .unwrap_or_else(|_| "http://localhost:6333".to_string()),

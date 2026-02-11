@@ -3,46 +3,49 @@ import { randomUUID } from 'crypto';
 
 type ChatMessage = { id: number; sender: 'user' | 'assistant'; text: string };
 
-// Middleware API configuration
-const MIDDLEWARE_URL = process.env.MIDDLEWARE_URL || 'http://localhost:7000';
-const MIDDLEWARE_CHAT_ENDPOINT = `${MIDDLEWARE_URL}/chat`;
+// OpenAPI-compatible AI inference configuration
+const MIDDLEWARE_URL = process.env.MIDDLEWARE_URL || 'http://localhost:8001';
+const OPENAI_CHAT_ENDPOINT = `${MIDDLEWARE_URL}/v1/chat/completions`;
+const HEALTH_ENDPOINT = `${MIDDLEWARE_URL}/health`;
+const MODELS_ENDPOINT = `${MIDDLEWARE_URL}/v1/models`;
+const MODEL_NAME = 'qwen3-tensorrtllm';
 const MAX_MESSAGES_IN_UI = 100;
 const MAX_TOKENS = 2048;
 const TEMPERATURE = 0.7;
 
 export function activate(context: vscode.ExtensionContext): void {
   try {
-    console.log('[Triton AI] ✅ Extension activating...');
+    console.log('[AI Chat] ✅ Extension activating...');
     
     // Show notification immediately to confirm extension is running
-    vscode.window.showInformationMessage('🚀 Triton AI Chat is starting...');
+    vscode.window.showInformationMessage('🚀 AI Chat is starting...');
     
-    const startDisposable = vscode.commands.registerCommand('tritonAI.start', () => {
+    const startDisposable = vscode.commands.registerCommand('aiChat.start', () => {
       console.log('[AI Chat] Start command executed');
-      vscode.window.showInformationMessage('🚀 AI Chat Ready - Powered by Triton Inference Server is active!');
+      vscode.window.showInformationMessage('🚀 AI Chat Ready!');
     });
 
-    const chatDisposable = vscode.commands.registerCommand('tritonAI.openChat', () => {
-      console.log('[Triton AI] Open chat command executed');
+    const chatDisposable = vscode.commands.registerCommand('aiChat.openChat', () => {
+      console.log('[AI Chat] Open chat command executed');
       ChatPanel.createOrShow(context);
     });
 
     context.subscriptions.push(startDisposable, chatDisposable);
     
     // Auto-open chat on startup
-    console.log('[Triton AI] Opening chat panel automatically...');
+    console.log('[AI Chat] Opening chat panel automatically...');
     setTimeout(() => {
       try {
         ChatPanel.createOrShow(context);
-        console.log('[Triton AI] ✅ Chat panel created successfully');
+        console.log('[AI Chat] ✅ Chat panel created successfully');
       } catch (err) {
-        console.error('[Triton AI] ❌ Error creating chat panel:', err);
-        vscode.window.showErrorMessage(`Triton AI Error: ${err}`);
+        console.error('[AI Chat] ❌ Error creating chat panel:', err);
+        vscode.window.showErrorMessage(`AI Chat Error: ${err}`);
       }
     }, 100);
   } catch (error) {
-    console.error('[Triton AI] ❌ Activation error:', error);
-    vscode.window.showErrorMessage(`Triton AI activation failed: ${error}`);
+    console.error('[AI Chat] ❌ Activation error:', error);
+    vscode.window.showErrorMessage(`AI Chat activation failed: ${error}`);
   }
 }
 
@@ -57,7 +60,7 @@ class ChatPanel {
     {
       id: 1,
       sender: 'assistant',
-      text: '🤖 Triton AI Chat Assistant\n\nHello! I\'m a text generation AI powered by Triton Inference Server. I support:\n• Real-time text generation with customizable parameters\n• Streaming responses for long outputs\n• Fast inference with response timing\n• Persistent conversation context\n• Flexible model configuration via Triton backend\n\nWhat would you like to know or discuss?',
+      text: '🤖 AI Chat Assistant\n\nHello! I\'m an AI assistant powered by OpenAPI-compatible inference. I support:\n• Real-time text generation with customizable parameters\n• Fast inference with response timing\n• Persistent conversation context\n• Token usage statistics\n• Compatible with various AI models and backends\n\nWhat would you like to know or discuss?',
     },
   ];
   private nextId = 2;
@@ -68,16 +71,16 @@ class ChatPanel {
 
   private constructor(private readonly context: vscode.ExtensionContext) {
     try {
-      console.log('[Triton AI] Creating webview panel...');
+      console.log('[AI Chat] Creating webview panel...');
       this.panel = vscode.window.createWebviewPanel(
-        'tritonAIChat',
-        'Triton AI Chat',
+        'aiChat',
+        'AI Chat',
         vscode.ViewColumn.Beside,
         {
           enableScripts: true,
         },
       );
-      console.log('[Triton AI] Webview panel created');
+      console.log('[AI Chat] Webview panel created');
 
       this.panel.onDidDispose(() => this.dispose(), null, this.context.subscriptions);
       this.panel.webview.onDidReceiveMessage(msg => this.onMessage(msg));
@@ -87,11 +90,11 @@ class ChatPanel {
       // Send initial state to webview immediately
       this.pushState();
       // Then check server health
-      console.log('[AI Chat] Checking middleware health...');
+      console.log('[AI Chat] Checking server health...');
       this.checkServerHealth();
       console.log('[AI Chat] ChatPanel constructor complete');
     } catch (err) {
-      console.error('[Triton AI] Error in ChatPanel constructor:', err);
+      console.error('[AI Chat] Error in ChatPanel constructor:', err);
       throw err;
     }
   }
@@ -115,40 +118,63 @@ class ChatPanel {
 
   private async checkServerHealth(): Promise<void> {
     try {
-      // Check middleware health by making a test request
-      const testResponse = await fetch(MIDDLEWARE_CHAT_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: 'health-check',
-          user_message: 'ping',
-          max_tokens: 1,
-          temperature: 0.7,
-          top_p: 0.9
-        }),
+      console.log('[AI Chat] Checking health at:', HEALTH_ENDPOINT);
+      // Check health endpoint
+      const healthResponse = await fetch(HEALTH_ENDPOINT, {
+        method: 'GET',
       });
       
-      if (testResponse.ok) {
+      console.log('[AI Chat] Health response status:', healthResponse.status);
+      
+      if (healthResponse.ok) {
+        // Try to parse JSON, but don't fail if it's not valid JSON
+        let healthData: any = {};
+        try {
+          const contentType = healthResponse.headers.get('content-type');
+          if (contentType?.includes('application/json')) {
+            healthData = await healthResponse.json();
+          }
+        } catch (jsonError) {
+          console.log('[AI Chat] Response body is not JSON, that\'s ok');
+          // Response is 200 OK, even if body isn't JSON - server is running
+        }
+        
         this.modelLoaded = true;
-        this.serverStatus = `Middleware: Ready (${MIDDLEWARE_URL})`;
+        const tritonStatus = healthData?.triton_server === 'connected' ? 'connected' : (healthData?.triton_server || 'connected');
+        this.serverStatus = `AI Server: Ready (${MIDDLEWARE_URL})`;
+        console.log('[AI Chat] Server is healthy:', this.serverStatus);
       } else {
-        this.serverStatus = 'Middleware: Server running, error on test request';
+        console.error('[AI Chat] Health check returned non-200 status:', healthResponse.status);
+        this.serverStatus = 'AI Server: Health check failed';
         this.modelLoaded = false;
       }
-    } catch {
-      this.serverStatus = `Middleware: Not running (${MIDDLEWARE_URL})`;
+    } catch (error) {
+      console.error('[AI Chat] Health check caught error:', error);
+      this.serverStatus = `AI Server: Not reachable (${MIDDLEWARE_URL})`;
       this.modelLoaded = false;
     }
     this.pushState();
   }
 
   private async loadModel(): Promise<void> {
-    // With middleware, models are loaded at startup - just check status
+    // Check server health and available models
     await this.checkServerHealth();
     if (this.modelLoaded) {
-      this.addMessage('assistant', `✓ Middleware is ready at ${MIDDLEWARE_URL}`);
+      try {
+        const modelsResponse = await fetch(MODELS_ENDPOINT);
+        if (modelsResponse.ok) {
+          const modelsData: any = await modelsResponse.json();
+          const modelsList = modelsData?.data?.map((m: any) => m.id).join(', ') || MODEL_NAME;
+          this.addMessage('assistant', `✓ AI Server ready at ${MIDDLEWARE_URL}\nAvailable models: ${modelsList}`);
+        } else {
+          this.addMessage('assistant', `✓ AI Server ready at ${MIDDLEWARE_URL}`);
+        }
+      } catch (error) {
+        console.error('[AI Chat] Error loading models:', error);
+        this.addMessage('assistant', `✓ AI Server ready at ${MIDDLEWARE_URL}`);
+      }
     } else {
-      this.addMessage('assistant', 'Error: Middleware not loaded. Please start the service first.');
+      this.addMessage('assistant', 'Error: AI Server not loaded. Please start the service first.');
     }
   }
 
@@ -168,7 +194,7 @@ class ChatPanel {
       this.pushState(); // Show user message immediately
 
       if (!this.modelLoaded) {
-        this.addMessage('assistant', 'Error: Middleware not ready. Please start the service first.');
+        this.addMessage('assistant', 'Error: AI Server not ready. Please start the service first.');
         this.pushState();
         return;
       }
@@ -185,38 +211,49 @@ class ChatPanel {
 
       try {
         const startTime = Date.now();
-        console.log('[AI Chat] Sending request to middleware:', userMsg.text);
+        console.log('[AI Chat] Sending OpenAPI request:', userMsg.text);
         
-        // Build middleware request (simple and clean)
-        const middlewareRequest = {
-          session_id: this.sessionId,
-          user_message: userMsg.text,
+        // Build conversation history in OpenAPI format
+        const conversationHistory = this.messages
+          .filter(msg => msg.sender !== 'assistant' || !msg.text.includes('⏳ Processing'))
+          .slice(-10) // Keep last 10 messages for context
+          .map(msg => ({
+            role: msg.sender === 'user' ? 'user' : 'assistant',
+            content: msg.text.replace(/\n\n⏱️ Total: [\d.]+s.*$/, '') // Remove timing info including token stats
+          }));
+        
+        // Build OpenAPI compatible request
+        const openaiRequest = {
+          model: MODEL_NAME,
+          messages: conversationHistory,
           max_tokens: MAX_TOKENS,
           temperature: TEMPERATURE,
-          top_p: 0.9
+          top_p: 0.9,
+          stream: false
         };
 
-        const response = await fetch(MIDDLEWARE_CHAT_ENDPOINT, {
+        const response = await fetch(OPENAI_CHAT_ENDPOINT, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(middlewareRequest),
+          body: JSON.stringify(openaiRequest),
         });
 
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(`Middleware error (${response.status}): ${errorText}`);
+          throw new Error(`AI server error (${response.status}): ${errorText}`);
         }
 
         const responseData = (await response.json()) as any;
-        console.log('[AI Chat] Received response from middleware:', responseData);
+        console.log('[AI Chat] Received OpenAPI response:', responseData);
         
-        // Extract response text from middleware
-        const responseText = responseData.response || 'No response received from model';
+        // Extract response text from OpenAPI format
+        const responseText = responseData.choices?.[0]?.message?.content || 'No response received from model';
         const totalTime = (Date.now() - startTime) / 1000;
+        const usage = responseData.usage;
         
-        console.log('[AI Chat] Response time:', totalTime);
+        console.log('[AI Chat] Response time:', totalTime, 'Usage:', usage);
         
-        const displayText = `${responseText}\n\n⏱️ Total: ${totalTime.toFixed(2)}s`;
+        const displayText = `${responseText}\n\n⏱️ Total: ${totalTime.toFixed(2)}s | Tokens: ${usage?.total_tokens || 'N/A'} (prompt: ${usage?.prompt_tokens || 'N/A'}, completion: ${usage?.completion_tokens || 'N/A'})`;
         
         // Remove loading message and add real response
         this.messages.pop();
@@ -245,7 +282,7 @@ class ChatPanel {
       ];
       this.pushState();
     } else if (message.action === 'check-health') {
-      console.log('[AI Chat] Checking middleware health...');
+      console.log('[AI Chat] Checking server health...');
       await this.checkServerHealth();
       console.log('[AI Chat] Health check complete:', this.serverStatus);
       this.addMessage('assistant', `Status: ${this.serverStatus}`);
@@ -269,7 +306,7 @@ class ChatPanel {
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Triton AI Chat</title>
+  <title>AI Chat</title>
   <style>
     * { box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; background: #0b1220; color: #e2e8f0; }
@@ -295,8 +332,8 @@ class ChatPanel {
 <body>
   <header>
     <div>
-      <div class="header-title">🤖 Triton AI Chat</div>
-      <div class="header-status" id="status-text">Checking Triton server...</div>
+      <div class="header-title">🤖 AI Chat</div>
+      <div class="header-status" id="status-text">Checking server...</div>
     </div>
     <div class="controls">
       <button id="health-btn" class="secondary" style="flex: 0 1 auto;">Check Status</button>

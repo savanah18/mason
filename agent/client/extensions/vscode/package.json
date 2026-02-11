@@ -1,8 +1,8 @@
 {
-  "name": "triton-ai-chat",
-  "displayName": "Triton AI Chat Assistant",
-  "description": "Generic AI chat assistant powered by Triton Inference Server with batch inference, embedding extraction, and multimodal support.",
-  "version": "0.2.0",
+  "name": "ai-chat-assistant",
+  "displayName": "AI Chat Assistant",
+  "description": "OpenAPI-compatible AI chat assistant with support for various inference backends including TensorRT-LLM, vLLM, OpenAI, and more.",
+  "version": "0.3.0",
   "publisher": "your-publisher",
   "engines": {
     "vscode": "^1.87.0"
@@ -17,12 +17,12 @@
   "contributes": {
     "commands": [
       {
-        "command": "tritonAI.start",
-        "title": "Triton AI: Start"
+        "command": "aiChat.start",
+        "title": "AI Chat: Start"
       },
       {
-        "command": "tritonAI.openChat",
-        "title": "Triton AI: Open Chat Assistant"
+        "command": "aiChat.openChat",
+        "title": "AI Chat: Open Chat Assistant"
       }
     ]
   },
