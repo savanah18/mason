@@ -3,13 +3,12 @@ import { randomUUID } from 'crypto';
 
 type ChatMessage = { id: number; sender: 'user' | 'assistant'; text: string };
 
-// Triton Inference Server configuration
-const TRITON_HTTP_URL = 'http://localhost:8000';
-const TRITON_MODEL_NAME = 'qwen3-vl';
-const TRITON_INFER_ENDPOINT = `${TRITON_HTTP_URL}/v2/models/${TRITON_MODEL_NAME}/infer`;
-const TRITON_HEALTH_ENDPOINT = `${TRITON_HTTP_URL}/v2/health/ready`;
-const TRITON_MODEL_READY_ENDPOINT = `${TRITON_HTTP_URL}/v2/models/${TRITON_MODEL_NAME}/ready`;
-const MAX_MESSAGES_IN_UI = 100; // Limit chat display to prevent memory issues
+// Middleware API configuration
+const MIDDLEWARE_URL = process.env.MIDDLEWARE_URL || 'http://localhost:7000';
+const MIDDLEWARE_CHAT_ENDPOINT = `${MIDDLEWARE_URL}/chat`;
+const MAX_MESSAGES_IN_UI = 100;
+const MAX_TOKENS = 2048;
+const TEMPERATURE = 0.7;
 
 export function activate(context: vscode.ExtensionContext): void {
   try {
@@ -19,8 +18,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.showInformationMessage('🚀 Triton AI Chat is starting...');
     
     const startDisposable = vscode.commands.registerCommand('tritonAI.start', () => {
-      console.log('[Triton AI] Start command executed');
-      vscode.window.showInformationMessage('🚀 Triton AI Chat Ready - Generic AI assistant powered by Triton Inference Server is active!');
+      console.log('[AI Chat] Start command executed');
+      vscode.window.showInformationMessage('🚀 AI Chat Ready - Powered by Triton Inference Server is active!');
     });
 
     const chatDisposable = vscode.commands.registerCommand('tritonAI.openChat', () => {
@@ -58,20 +57,18 @@ class ChatPanel {
     {
       id: 1,
       sender: 'assistant',
-      text: '🤖 Triton AI Chat Assistant\n\nHello! I\'m a versatile AI assistant powered by Triton Inference Server with Qwen3-VL-8B-Instruct. I support:\n• Real-time text generation (max 32 batch)\n• Embedding extraction and vectorization\n• Multimodal input (text + images)\n• Fast inference with response timing\n• Persistent KV cache across conversation\n• Flexible model configuration\n\nWhat would you like to know or discuss?',
+      text: '🤖 Triton AI Chat Assistant\n\nHello! I\'m a text generation AI powered by Triton Inference Server. I support:\n• Real-time text generation with customizable parameters\n• Streaming responses for long outputs\n• Fast inference with response timing\n• Persistent conversation context\n• Flexible model configuration via Triton backend\n\nWhat would you like to know or discuss?',
     },
   ];
   private nextId = 2;
   private serverStatus = 'Checking...';
   private modelLoaded = false;
   private isLoading = false;
-  private sessionId: string; // Session ID for KV cache persistence
+  private sessionId: string = randomUUID();
 
   private constructor(private readonly context: vscode.ExtensionContext) {
     try {
-      // Generate session ID for this chat instance
-      this.sessionId = this.generateSessionId();
-      console.log(`[Triton AI] Creating webview panel with session: ${this.sessionId}...`);
+      console.log('[Triton AI] Creating webview panel...');
       this.panel = vscode.window.createWebviewPanel(
         'tritonAIChat',
         'Triton AI Chat',
@@ -84,15 +81,15 @@ class ChatPanel {
 
       this.panel.onDidDispose(() => this.dispose(), null, this.context.subscriptions);
       this.panel.webview.onDidReceiveMessage(msg => this.onMessage(msg));
-      console.log('[Triton AI] Setting webview HTML...');
+      console.log('[AI Chat] Setting webview HTML...');
       this.panel.webview.html = this.renderHtml();
-      console.log('[Triton AI] HTML set, sending initial state...');
+      console.log('[AI Chat] HTML set, sending initial state...');
       // Send initial state to webview immediately
       this.pushState();
       // Then check server health
-      console.log('[Triton AI] Checking server health...');
+      console.log('[AI Chat] Checking middleware health...');
       this.checkServerHealth();
-      console.log('[Triton AI] ChatPanel constructor complete');
+      console.log('[AI Chat] ChatPanel constructor complete');
     } catch (err) {
       console.error('[Triton AI] Error in ChatPanel constructor:', err);
       throw err;
@@ -118,36 +115,45 @@ class ChatPanel {
 
   private async checkServerHealth(): Promise<void> {
     try {
-      // Check Triton server health
-      const healthResponse = await fetch(TRITON_HEALTH_ENDPOINT);
-      const modelResponse = await fetch(TRITON_MODEL_READY_ENDPOINT);
+      // Check middleware health by making a test request
+      const testResponse = await fetch(MIDDLEWARE_CHAT_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: 'health-check',
+          user_message: 'ping',
+          max_tokens: 1,
+          temperature: 0.7,
+          top_p: 0.9
+        }),
+      });
       
-      if (healthResponse.ok && modelResponse.ok) {
+      if (testResponse.ok) {
         this.modelLoaded = true;
-        this.serverStatus = `Triton: Ready | Model: ${TRITON_MODEL_NAME} loaded`;
+        this.serverStatus = `Middleware: Ready (${MIDDLEWARE_URL})`;
       } else {
-        this.serverStatus = 'Triton: Server running, model not ready';
+        this.serverStatus = 'Middleware: Server running, error on test request';
         this.modelLoaded = false;
       }
     } catch {
-      this.serverStatus = `Triton: Not running (${TRITON_HTTP_URL})`;
+      this.serverStatus = `Middleware: Not running (${MIDDLEWARE_URL})`;
       this.modelLoaded = false;
     }
     this.pushState();
   }
 
   private async loadModel(): Promise<void> {
-    // With Triton, models are loaded at startup - just check status
+    // With middleware, models are loaded at startup - just check status
     await this.checkServerHealth();
     if (this.modelLoaded) {
-      this.addMessage('assistant', `✓ Model ${TRITON_MODEL_NAME} is ready on Triton server`);
+      this.addMessage('assistant', `✓ Middleware is ready at ${MIDDLEWARE_URL}`);
     } else {
-      this.addMessage('assistant', 'Error: Model not loaded. Please start Triton server with the model.');
+      this.addMessage('assistant', 'Error: Middleware not loaded. Please start the service first.');
     }
   }
 
   private async onMessage(message: { type: string; text?: string; action?: string }): Promise<void> {
-    console.log('[Triton AI] Webview message received:', message);
+    console.log('[AI Chat] Webview message received:', message);
     if (message.type === 'send' && message.text) {
       const userMsg: ChatMessage = {
         id: this.nextId++,
@@ -157,12 +163,12 @@ class ChatPanel {
       if (!userMsg.text) {
         return;
       }
-      console.log('[Triton AI] User message:', userMsg.text);
+      console.log('[AI Chat] User message:', userMsg.text);
       this.messages.push(userMsg);
       this.pushState(); // Show user message immediately
 
       if (!this.modelLoaded) {
-        this.addMessage('assistant', 'Error: Triton server not ready. Please start the server first.');
+        this.addMessage('assistant', 'Error: Middleware not ready. Please start the service first.');
         this.pushState();
         return;
       }
@@ -179,75 +185,46 @@ class ChatPanel {
 
       try {
         const startTime = Date.now();
-        console.log('[Triton AI] Sending request to Triton:', userMsg.text);
+        console.log('[AI Chat] Sending request to middleware:', userMsg.text);
         
-        // Build Triton inference request with mode and session_id parameters
-        const tritonRequest = {
-          inputs: [
-            {
-              name: 'message',
-              shape: [1, 1],
-              datatype: 'BYTES',
-              data: [userMsg.text]
-            },
-            {
-              name: 'mode',
-              shape: [1, 1],
-              datatype: 'BYTES',
-              data: ['generate']  // Use 'generate' for text generation, 'embed' for embeddings
-            },
-            {
-              name: 'session_id',
-              shape: [1, 1],
-              datatype: 'BYTES',
-              data: [this.sessionId]  // Pass session ID for KV cache persistence
-            }
-          ],
-          outputs: [
-            { name: 'response' },
-            { name: 'response_time' }
-          ]
+        // Build middleware request (simple and clean)
+        const middlewareRequest = {
+          session_id: this.sessionId,
+          user_message: userMsg.text,
+          max_tokens: MAX_TOKENS,
+          temperature: TEMPERATURE,
+          top_p: 0.9
         };
 
-        const response = await fetch(TRITON_INFER_ENDPOINT, {
+        const response = await fetch(MIDDLEWARE_CHAT_ENDPOINT, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(tritonRequest),
+          body: JSON.stringify(middlewareRequest),
         });
 
-        if (response.ok) {
-          const data = (await response.json()) as { 
-            outputs: Array<{ name: string; data: string[]; shape: number[] }> 
-          };
-          
-          console.log('[Triton AI] Received response from Triton:', data);
-          
-          // Extract response and response_time from outputs
-          const responseOutput = data.outputs.find(o => o.name === 'response');
-          const timeOutput = data.outputs.find(o => o.name === 'response_time');
-          
-          // Handle both single and batch responses
-          const responseText = responseOutput?.data[0] || 'No response';
-          const responseTime = timeOutput?.data[0] || 0;
-          const totalTime = (Date.now() - startTime) / 1000;
-          
-          console.log('[Triton AI] Total time:', totalTime, 'Model time:', responseTime);
-          
-          const displayText = `${responseText}\n\n⏱️ Model: ${Number(responseTime).toFixed(2)}s | Total: ${totalTime.toFixed(2)}s | Triton: ${TRITON_MODEL_NAME}`;
-          
-          // Remove loading message and add real response
-          this.messages.pop();
-          this.addMessage('assistant', displayText);
-        } else {
+        if (!response.ok) {
           const errorText = await response.text();
-          console.error('[Triton AI] Triton error:', errorText);
-          this.messages.pop();
-          this.addMessage('assistant', `Triton error: ${errorText}`);
+          throw new Error(`Middleware error (${response.status}): ${errorText}`);
         }
-      } catch (error) {
-        console.error('[Triton AI] Connection error:', error);
+
+        const responseData = (await response.json()) as any;
+        console.log('[AI Chat] Received response from middleware:', responseData);
+        
+        // Extract response text from middleware
+        const responseText = responseData.response || 'No response received from model';
+        const totalTime = (Date.now() - startTime) / 1000;
+        
+        console.log('[AI Chat] Response time:', totalTime);
+        
+        const displayText = `${responseText}\n\n⏱️ Total: ${totalTime.toFixed(2)}s`;
+        
+        // Remove loading message and add real response
         this.messages.pop();
-        this.addMessage('assistant', `Error: Cannot connect to Triton server - ${error}`);
+        this.addMessage('assistant', displayText);
+      } catch (error) {
+        console.error('[AI Chat] Error:', error);
+        this.messages.pop();
+        this.addMessage('assistant', `Error: ${error}`);
       } finally {
         this.isLoading = false;
       }
@@ -257,20 +234,20 @@ class ChatPanel {
       this.pushState();
     } else if (message.action === 'clear-chat') {
       // Reset session ID when clearing chat to start fresh
-      this.sessionId = this.generateSessionId();
-      console.log(`[Triton AI] Chat cleared, new session: ${this.sessionId}`);
+      this.sessionId = randomUUID();
+      console.log(`[AI Chat] Chat cleared, new session: ${this.sessionId}`);
       this.messages = [
         {
           id: this.nextId++,
           sender: 'assistant',
-          text: 'Chat cleared. New session started with fresh KV cache.',
+          text: 'Chat cleared. New session started.',
         },
       ];
       this.pushState();
     } else if (message.action === 'check-health') {
-      console.log('[Triton AI] Checking server health...');
+      console.log('[AI Chat] Checking middleware health...');
       await this.checkServerHealth();
-      console.log('[Triton AI] Health check complete:', this.serverStatus);
+      console.log('[AI Chat] Health check complete:', this.serverStatus);
       this.addMessage('assistant', `Status: ${this.serverStatus}`);
       this.pushState();
     }
@@ -282,11 +259,6 @@ class ChatPanel {
       sender,
       text,
     });
-  }
-  
-  private generateSessionId(): string {
-    // Use Node.js built-in crypto for UUID v4 generation
-    return randomUUID();
   }
 
   private renderHtml(): string {

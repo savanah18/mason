@@ -29,7 +29,7 @@ services:
     #   dockerfile: Dockerfile.converter
     #   additional_contexts:
     #     site-packages: /root/miniconda3/envs/aiops-py312/lib/python3.12/site-packages
-    image: nvcr.io/nvidia/tensorrt-llm/release:1.2.0rc6.post3
+    image: nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc0
     container_name: tensorrt-llm-converter
     environment:
       <<: *common-env
@@ -44,7 +44,33 @@ services:
     command: 
     - /bin/bash
     - -c 
+    #- sleep 6000
     - /app/tensorrt_llm/src/scripts/pipeline.sh
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+  tensort-llm-server:
+    image: nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc0
+    container_name: tensorrt-llm-server
+    environment:
+      <<: *common-env
+    volumes:
+    - source: *host_tensort_engine_path
+      target: /app/tensorrt_llm/models/qwen3/1
+      type: bind
+    - /root/workspace/lnd/aiops/apps/newbie-app/agent/serving/optimization/tensorrt_llm:/app/tensorrt_llm/src/
+    - /root/workspace/lnd/aiops/vlm/Qwen/Qwen3-4B-Thinking-2507/:/app/tensorrt_llm/tokenizer/:ro
+    command: 
+    - /bin/bash
+    - -c 
+    - /app/tensorrt_llm/src/scripts/serve.sh
+    ports:
+      - "8001:8000"
     gpus: all
     deploy:
       resources:

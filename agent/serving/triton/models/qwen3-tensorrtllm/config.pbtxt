@@ -1,6 +1,6 @@
 name: "qwen3-tensorrtllm"
 backend: "tensorrtllm"
-max_batch_size: 8
+max_batch_size: 0
 
 # Tokenizer directory (HuggingFace tokenizer files: tokenizer.json, vocab.json, merges.txt)
 parameters {
@@ -21,21 +21,20 @@ parameters {
 
 # Transaction policy
 model_transaction_policy {
-  decoupled: True
+  decoupled: False
 }
 
 # Model inputs
 input [
   {
-    name: "text_input"
-    data_type: TYPE_STRING
-    dims: [ 1 ]
+    name: "input_ids"
+    data_type: TYPE_INT32
+    dims: [ -1 , -1]
   },
   {
-    name: "max_tokens"
+    name: "request_output_len"
     data_type: TYPE_INT32
     dims: [ 1 ]
-    optional: true
   },
   {
     name: "temperature"
@@ -44,13 +43,13 @@ input [
     optional: true
   },
   {
-    name: "top_p"
+    name: "runtime_top_p"
     data_type: TYPE_FP32
     dims: [ 1 ]
     optional: true
   },
   {
-    name: "stream"
+    name: "streaming"
     data_type: TYPE_BOOL
     dims: [ 1 ]
     optional: true
@@ -60,8 +59,13 @@ input [
 # Model outputs
 output [
   {
-    name: "text_output"
-    data_type: TYPE_STRING
+    name: "output_ids"
+    data_type: TYPE_INT32
+    dims: [ -1, -1 ]
+  },
+  {
+    name: "sequence_length"
+    data_type: TYPE_INT32
     dims: [ -1 ]
   }
 ]
@@ -87,38 +91,44 @@ parameters {
 
 parameters {
   key: "batching_strategy"
-  value: { string_value: "inflight_fused_batching " }  
+  value: { string_value: "inflight_fused_batching" }  
 }
 
 
 parameters {
   key: "kv_cache_free_gpu_mem_fraction"
-  value: { string_value: "0.05" }
+  value: { string_value: "0.6" }
+}
+
+parameters {
+  key: "enable_kv_cache_reuse"
+  value: { string_value: "false" }
 }
 
 parameters {
   key: "kv_cache_host_memory_bytes"
-  value: { string_value: "0" }
+  value: { string_value: "2147483648" }
 }
 
 parameters {
-  key: "kv_cache_onboard_blocks"
+  key: "kv_cache_onboard_blocks"  
   value: { string_value: "true" }
 }
 
+# THIS IS IMPORTANT
 parameters {
   key: "max_tokens_in_paged_kv_cache"
-  value: { string_value: "64" }
+  value: { string_value: "16384" }
 }
 
 parameters {
   key: "max_num_sequences"
-  value: { string_value: "8" }
+  value: { string_value: "4" }
 }
 
 parameters {
   key: "enable_trt_overlap"
-  value: { string_value: "true" }
+  value: { string_value: "false" }
 }
 
 parameters {

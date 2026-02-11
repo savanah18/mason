@@ -42,3 +42,7 @@ tools_summary_*.yaml
 # All outputs ignoe
 *output/**
 *outputs/**
+agent/serving/**/output/**
+agent/serving/**/outputs/**
+agent/serving/triton/models/*
+agent/serving/optimization/old_pipeline_archive/

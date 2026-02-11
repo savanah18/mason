@@ -19,6 +19,18 @@ RUN pip install --upgrade setuptools wheel
 # Usage: docker build --build-arg BUILD_MODE=dev --build-context site-packages=/root/miniconda3/envs/aiops-py312/lib/python3.12/site-packages .
 COPY --from=site-packages . /usr/local/lib/python3.12/dist-packages/
 
+RUN wget https://download.pytorch.org/whl/triton-3.5.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl && \
+    pip install *.whl && rm *.whl && \
+    printf "torch==2.9.1" > constraints.txt && \
+    pip install flash-attn --no-build-isolation -c constraints.txt  && \
+    rm constraints.txt
+
+RUN ln -s /usr/local/lib/python3.12/dist-packages/nvidia/cuda_runtime/lib/libcudart.so.12 \
+          /usr/local/lib/python3.12/dist-packages/torch/lib/libcudart.so.12
+
+ENV LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/nvidia/cuda_runtime/lib:$LD_LIBRARY_PATH
+
+
 # ============================================
 # Stage 2: Production - install via pip and python backend
 # ============================================
@@ -55,7 +67,7 @@ RUN pip install flash-attn --no-build-isolation
 # ============================================
 # Stage 3: Triton with TensorRT LLM backend
 # ============================================
-FROM nvcr.io/nvidia/tritonserver:25.12-trtllm-python-py3 AS prod-tensorrt-llm-stage
+FROM nvcr.io/nvidia/tritonserver:26.01-trtllm-python-py3 AS prod-tensorrt-llm-stage
 RUN echo "Using Triton image with TensorRT LLM backend for optimized inference"
 
 
