@@ -1,4 +1,4 @@
-name: "qwen3-vl"
+name: "qwen3-vl-python"
 backend: "python"
 max_batch_size: 32
 
