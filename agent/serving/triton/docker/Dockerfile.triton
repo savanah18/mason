@@ -68,6 +68,8 @@ RUN pip install flash-attn --no-build-isolation
 # Stage 3: Triton with TensorRT LLM backend
 # ============================================
 FROM nvcr.io/nvidia/tritonserver:26.01-trtllm-python-py3 AS prod-tensorrt-llm-stage
+
+RUN pip install tritonclient triton_python_backend_utils 
 RUN echo "Using Triton image with TensorRT LLM backend for optimized inference"
 
 
