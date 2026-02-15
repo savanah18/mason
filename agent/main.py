@@ -52,27 +52,40 @@ llm_cfg = {
 
 # Step 3: Create an agent. Here we use the `Assistant` agent as an example, which is capable of using tools and reading files.
 system_instruction = '''
-    You are an agent that manages services in a Kubernetes cluster. You can use the `kubernetes_mcp_tool` to interact with the cluster. Please use this tool to perform any operations related to Kubernetes, such as checking the status of pods, deploying applications, etc. Always provide detailed information about the operations you perform and their results.
+    You are an agent that manages services in a Kubernetes cluster.
+    Use the Kubernetes MCP tools (prefixed with `kubernetes-`) for any cluster operations.
+    Use the Helm MCP tools (prefixed with `helm-`) for Helm operations.
+    Always provide detailed information about the operations you perform and their results.
 '''
 
+# Initialize MCP tools with error handling
+mcp_tools = []
 mcp_config = {
     "mcpServers": {
         "kubernetes": {
             "type": "streamable-http",
-            "url": "http://localhost:8080/mcp"
-        }
+            "url": "http://localhost:8081/mcp",
+            "sse_read_timeout": 5,
+        },
+        # "helm": {
+        #     "type": "streamable-http",  # helm returns SSE responses even in HTTP mode
+        #     "url": "http://localhost:8012/mcp",
+        #     "sse_read_timeout": 5,
+        # },        
     }
 }
-mcp_tools = MCPManager().initConfig(mcp_config)
 
-system_instruction = '''
-    You are an agent that manages services in a Kubernetes cluster.
-    Use the Kubernetes MCP tools (prefixed with `kubernetes-`) for any cluster operations.
-    Always provide detailed information about the operations you perform and their results.
-'''
+try:
+    mcp_tools = MCPManager().initConfig(mcp_config)
+    print(f"✓ Successfully loaded {len(mcp_tools)} MCP tools")
+except Exception as e:
+    raise(e)
+    print(f"⚠ Warning: Failed to initialize MCP servers: {e}")
+    print("  Continuing with limited functionality...")
+    mcp_tools = []
 
 tools = ['my_image_gen', 'code_interpreter'] + mcp_tools  # `code_interpreter` is a built-in tool for executing code.
-files = ['./examples/resource/doc.pdf']  # Give the bot a PDF file to read.
+files = []  # Give the bot a PDF file to read.
 bot = Assistant(llm=llm_cfg,
                 system_message=system_instruction,
                 function_list=tools,
