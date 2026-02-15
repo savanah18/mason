@@ -31,7 +31,7 @@ impl AutonomousAgent {
             tool_executor.set_session_id(session_id.to_string());
         }
         
-        let decision_engine = DecisionEngine::new(&config.triton_url, &config);
+        let decision_engine = DecisionEngine::new(&config.llm_api_url, &config);
         let context_retriever = ContextRetriever::new(&config.qdrant_url);
         let prompt_builder = PromptBuilder::new();
         let goal_repository = GoalRepository::new("./data/goals")?;

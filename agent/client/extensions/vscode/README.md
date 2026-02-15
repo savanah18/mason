@@ -1,119 +1,120 @@
-# Triton AI Chat Assistant
+# AI Chat Assistant
 
-Generic AI chat assistant powered by Triton Inference Server with Qwen3-VL-8B-Instruct model. Features high-performance inference with batch processing, embedding extraction, and multimodal support.
+OpenAPI-compatible AI chat assistant supporting various inference backends including TensorRT-LLM, vLLM, OpenAI, Triton, and more. Features high-performance inference with conversation context, token usage tracking, and easy backend switching.
 
 ## Current Features
 
-- **Real-time AI chat** powered by Qwen3-VL-8B-Instruct
-- **Triton Inference Server** integration with HTTP/gRPC endpoints
-- **Batch inference support** (up to 32 concurrent requests)
-- **Dual-mode inference**: Text generation and embedding extraction
-- **Multimodal support** (text + images) via base64 encoding
-- **Response timing** metrics for performance tracking (model + total time)
+- **Real-time AI chat** with OpenAPI-compatible endpoints
+- **Backend flexibility**: Works with TensorRT-LLM, vLLM, Triton, OpenAI, and other OpenAPI-compatible servers
+- **Conversation context**: Maintains chat history across multiple turns
+- **Token usage tracking**: Monitor prompt, completion, and total tokens
+- **Response timing** metrics for performance tracking
 - **Chat persistence** with clear/reset functionality
-- **Server health monitoring** with model status display
+- **Server health monitoring** with automatic status checks
 - **Easy configuration** via environment variables
 - **Production-ready** with comprehensive error handling
 
 ## Infrastructure
 
-- **Backend**: Triton Inference Server (HTTP: `8000`, gRPC: `8001`, Metrics: `8002`)
-- **Model**: Qwen3-VL-8B-Instruct with int4 quantization (BitsAndBytes)
-- **Protocol**: Triton HTTP/REST API (gRPC available)
-- **Batch Processing**: Dynamic batching with preferred sizes [16, 32]
-- **Max Batch Size**: 32 concurrent requests
-- **Inference Modes**:
-  - `generate`: Text generation (default)
-  - `embed`: 3584-dim embedding extraction with L2 normalization
+- **Backend**: OpenAPI-compatible inference server (default: `http://localhost:7000`)
+- **Endpoints**:
+  - `/v1/chat/completions`: Chat inference (OpenAI-compatible)
+  - `/health`: Server health status
+  - `/v1/models`: List available models
+- **Supported Backends**:
+  - TensorRT-LLM with OpenAPI middleware
+  - vLLM (OpenAI-compatible mode)
+  - Triton Inference Server (with OpenAPI adapter)
+  - OpenAI API
+  - LocalAI, Ollama, and other compatible servers
+- **Configuration**: Set `MIDDLEWARE_URL` environment variable to change server endpoint
 
-## API Updates (v0.2.0)
+## API Format
 
-### Triton Request Format
+### OpenAI-Compatible Request Format
 ```json
 {
-  "inputs": [
-    {
-      "name": "message",
-      "shape": [1, 1],
-      "datatype": "BYTES",
-      "data": ["Your question here"]
-    },
-    {
-      "name": "mode",
-      "shape": [1, 1],
-      "datatype": "BYTES",
-      "data": ["generate"]  // or "embed"
-    }
+  "model": "qwen3-tensorrtllm",
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "Your question here"}
   ],
-  "outputs": [
-    { "name": "response" },
-    { "name": "response_time" },
-    { "name": "embedding" }  // only for embed mode
-  ]
+  "temperature": 0.7,
+  "top_p": 0.9,
+  "max_tokens": 2048,
+  "stream": false
 }
 ```
 
 ### Response Format
 ```json
 {
-  "outputs": [
+  "id": "chatcmpl-abc123",
+  "object": "chat.completion",
+  "created": 1707639600,
+  "model": "qwen3-tensorrtllm",
+  "choices": [
     {
-      "name": "response",
-      "datatype": "BYTES",
-      "shape": [1, 1],
-      "data": ["Generated text response"]
-    },
-    {
-      "name": "response_time",
-      "datatype": "FP32",
-      "shape": [1, 1],
-      "data": [2.45]
-    },
-    {
-      "name": "embedding",
-      "datatype": "FP32",
-      "shape": [1, 3584],  // or [1, 0] for generate mode
-      "data": [...]
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Generated text response"
+      },
+      "finish_reason": "stop"
     }
-  ]
+  ],
+  "usage": {
+    "prompt_tokens": 15,
+    "completion_tokens": 42,
+    "total_tokens": 57
+  }
 }
 ```
 
 ## Upcoming Features 🚀
 
-- **Context window management** with sliding window for long conversations
+- **Streaming responses** for real-time generation
 - **RAG integration** for knowledge base retrieval
 - **Function calling** support for tool use
-- **Custom model switching** for different inference tasks
+- **Custom model switching** via UI
 - **Performance profiling** and optimization dashboard
-- **Multi-turn conversations** with state management
+- **Multi-turn conversations** with context management
 - **Prompt templates** library for common tasks
-- **Export capabilities** for chat history and embeddings
+- **Export capabilities** for chat history
+- **Embedding support** for semantic search
 
 ## Commands
 
-- `Triton AI: Start` (command id: `tritonAI.start`) — Initialize the Triton AI assistant
-- `Triton AI: Open Chat Assistant` (command id: `tritonAI.openChat`) — Opens the chat panel
+- `AI Chat: Start` (command id: `aiChat.start`) — Initialize the AI assistant
+- `AI Chat: Open Chat Assistant` (command id: `aiChat.openChat`) — Opens the chat panel
 
 ## Getting Started
 
 ### Prerequisites
-1. **Triton Inference Server** running with qwen3-vl model
+1. **OpenAPI-compatible inference server** (e.g., TensorRT-LLM middleware)
    ```bash
-   cd /root/workspace/lnd/aiops/apps/newbie-app
-   docker compose up triton-server
+   # Example: Start TensorRT-LLM middleware
+   cd /root/workspace/lnd/aiops/apps/newbie-app/agent/middleware/context_handler
+   python src/api.py
    ```
    
-2. **Verify Triton is ready**:
+2. **Verify server is ready**:
    ```bash
-   curl http://localhost:8000/v2/health/ready
-   curl http://localhost:8000/v2/models/qwen3-vl/ready
+   # Health check
+   curl http://localhost:7000/health
+   
+   # List models
+   curl http://localhost:7000/v1/models
+   
+   # Test chat endpoint
+   curl -X POST http://localhost:7000/v1/chat/completions \
+     -H "Content-Type: application/json" \
+     -d '{"model":"qwen3-tensorrtllm","messages":[{"role":"user","content":"Hello"}]}'
    ```
 
-3. **Server Configuration** (defaults to localhost:8000):
-   - HTTP endpoint: `http://localhost:8000`
-   - gRPC endpoint: `localhost:8001`
-   - Metrics: `localhost:8002`
+3. **Server Configuration** (default: `http://localhost:7000`):
+   - Set `MIDDLEWARE_URL` environment variable to change endpoint
+   - Example: `export MIDDLEWARE_URL=http://your-server:8080`
 
 ### Extension Setup
 1. Navigate to extension directory:
@@ -134,9 +135,9 @@ Generic AI chat assistant powered by Triton Inference Server with Qwen3-VL-8B-In
    
 4. Press `F5` in VS Code to launch the Extension Development Host
 
-5. Use `Triton AI: Open Chat Assistant` command to open the chat panel
+5. Use `AI Chat: Open Chat Assistant` command to open the chat panel
 
-6. Verify Triton server connection - status will show in the header
+6. Verify server connection - status will show in the header
 
 ## Packaging
 

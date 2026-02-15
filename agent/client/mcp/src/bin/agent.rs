@@ -14,7 +14,7 @@ async fn main() -> Result<()> {
     
     println!("{} Configuration loaded:", "✓".green().bold());
     println!("  MCP Server: {}", config.mcp_base_url);
-    println!("  Triton URL: {}", config.triton_url);
+    println!("  LLM API URL: {}", config.llm_api_url);
     println!("  Qdrant URL: {}", config.qdrant_url);
     println!();
     
