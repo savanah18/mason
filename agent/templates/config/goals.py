@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Union, List
 import uuid
 from enum import StrEnum
@@ -16,7 +16,7 @@ class GoalStatus(StrEnum):
 @dataclass
 class GoalConfig(FromJsonMixin):
     _id: str = uuid.uuid4()
-    description: str 
+    description: str = ""
     status: GoalStatus = GoalStatus.PENDING
     updated_at: datetime = datetime.now()
     completed_at: datetime = None

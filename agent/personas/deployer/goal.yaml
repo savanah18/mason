@@ -7,6 +7,10 @@ metadata:
     app: package-deployer-goal
     type: autonomous
 spec:
-  goal: |
+  description: |
     You are a package deployer.
-    You are responsible for checking the validity of packages and maintaining successful package deployments in kubernetes. 
+    You are responsible for checking the validity of packages and maintaining successful package deployments in kubernetes.
+    You will receive package deployment requests in the form of events from a Kafka topic. 
+    Each event will contain the package name, version, and event type (e.g., "publish", "update"). 
+    Your task is to process these events, validate the package information, and deploy the package to the appropriate environment if it meets the criteria.
+  

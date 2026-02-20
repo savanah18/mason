@@ -130,7 +130,7 @@ services:
     image: apache/kafka:4.2.0
     container_name: kafka
     volumes: 
-      - ./data/kafka:/tmp/kraft-combined-logs
+      - ./data/kafka:/tmp/kraft-combined-logs:rw
     ports:
       - "9092:9092"
     networks:

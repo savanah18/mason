@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, asdict
 from typing import Type, TypeVar, Any, Dict
 from datetime import datetime
 

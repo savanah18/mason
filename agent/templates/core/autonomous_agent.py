@@ -1,25 +1,29 @@
-from typing import List
+from typing import List, Any
+import time
 
 from .sensor import Sensor
-from ..models.goals import Goal
+from ..config.goals import Goal
 
 class BaseAgent:
     def __init__(self, 
-        goal: Goal,  # can be added to system prompt
+        goal: Goal,
         sensors: List[Sensor],
         actuators: Any,
         *args,
         **kwargs
     ):
         self.goal = goal
-        self.sensor = Sensor
+        self.sensors = sensors
         self.is_terminated = False
         # others
-        self.verbose = kwargs.verbose or false
+        self.verbose = kwargs.get('verbose') or False
 
-    def perceive(self):
-        data = self.sensor.acquire_percepts()
-    
+        # context history
+        self.messages = []
+
+    def perceive(self) -> List[Any]:
+        return [sensor.acquire_percepts() for sensor in self.sensors]
+
     def plan(self):
         pass
 
@@ -29,9 +33,11 @@ class BaseAgent:
     def terminate(self):
         self.terminate = True
 
-    def run(self):
-        while(not is_terminated):
-            # TODO 
-            pass
+    def reason(self, percepts=[]):
+        pass
 
-    
+    def launch(self):
+        while(not self.is_terminated):
+            percepts =  [next(percept) for percept in self.perceive()] 
+            self.reason(percepts)
+            time.sleep(1)
