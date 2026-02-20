@@ -26,7 +26,7 @@ certs/
 certificates/
 
 # Data directories
-data/
+**data/
 
 # Rust build artifacts
 *target/

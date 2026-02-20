@@ -63,7 +63,7 @@ services:
 
   # Development TensorRT-LLM Converter Service
   # Use this instead of triton if there is no existing supported triton image for your model
-  main-tensort-llm-server:
+  main-tensorrt-llm-server:
     image: nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc0
     container_name: main-tensorrt-llm-server
     volumes:
@@ -130,7 +130,7 @@ services:
     image: apache/kafka:4.2.0
     container_name: kafka
     volumes: 
-      - ./data/kafka:/tmp/kraft-combined-logs:rw
+      - ./memory/episodic/kafka/data:/tmp/kraft-combined-logs:rw
     ports:
       - "9092:9092"
     networks:
