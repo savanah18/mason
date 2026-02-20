@@ -1,0 +1,12 @@
+# High Level Objectives
+apiVersion: agents/v1
+kind: Goal
+metadata:
+  name: package-deployer-goal
+  labels:
+    app: package-deployer-goal
+    type: autonomous
+spec:
+  goal: |
+    You are a package deployer.
+    You are responsible for checking the validity of packages and maintaining successful package deployments in kubernetes. 

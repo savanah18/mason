@@ -1,50 +1,42 @@
 import * as vscode from 'vscode';
-import { randomUUID } from 'crypto';
 
 type ChatMessage = { id: number; sender: 'user' | 'assistant'; text: string };
 
-// OpenAPI-compatible AI inference configuration
-const MIDDLEWARE_URL = process.env.MIDDLEWARE_URL || 'http://localhost:8001';
-const OPENAI_CHAT_ENDPOINT = `${MIDDLEWARE_URL}/v1/chat/completions`;
-const HEALTH_ENDPOINT = `${MIDDLEWARE_URL}/health`;
-const MODELS_ENDPOINT = `${MIDDLEWARE_URL}/v1/models`;
-const MODEL_NAME = 'qwen3-tensorrtllm';
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8002';
+const CHAT_VERSION = '0.4.0';
+const CHAT_ENDPOINT = `${BACKEND_URL}/chat/send`;
+const HEALTH_ENDPOINT = `${BACKEND_URL}/health`;
+const CREATE_SESSION_ENDPOINT = `${BACKEND_URL}/session/create`;
+const CLEAR_CHAT_ENDPOINT = `${BACKEND_URL}/chat/clear`;
 const MAX_MESSAGES_IN_UI = 100;
-const MAX_TOKENS = 2048;
-const TEMPERATURE = 0.7;
+const REQUEST_TIMEOUT_MS = 60000;
+const HEALTH_CHECK_TIMEOUT_MS = 5000;
 
 export function activate(context: vscode.ExtensionContext): void {
   try {
-    console.log('[AI Chat] ✅ Extension activating...');
-    
-    // Show notification immediately to confirm extension is running
-    vscode.window.showInformationMessage('🚀 AI Chat is starting...');
-    
+    console.log('[AI Chat] Activating extension');
+    vscode.window.showInformationMessage('AI Chat is starting...');
+
     const startDisposable = vscode.commands.registerCommand('aiChat.start', () => {
-      console.log('[AI Chat] Start command executed');
-      vscode.window.showInformationMessage('🚀 AI Chat Ready!');
+      vscode.window.showInformationMessage('AI Chat Ready');
     });
 
     const chatDisposable = vscode.commands.registerCommand('aiChat.openChat', () => {
-      console.log('[AI Chat] Open chat command executed');
       ChatPanel.createOrShow(context);
     });
 
     context.subscriptions.push(startDisposable, chatDisposable);
-    
-    // Auto-open chat on startup
-    console.log('[AI Chat] Opening chat panel automatically...');
+
     setTimeout(() => {
       try {
         ChatPanel.createOrShow(context);
-        console.log('[AI Chat] ✅ Chat panel created successfully');
       } catch (err) {
-        console.error('[AI Chat] ❌ Error creating chat panel:', err);
+        console.error('[AI Chat] Failed to open chat panel:', err);
         vscode.window.showErrorMessage(`AI Chat Error: ${err}`);
       }
     }, 100);
   } catch (error) {
-    console.error('[AI Chat] ❌ Activation error:', error);
+    console.error('[AI Chat] Activation error:', error);
     vscode.window.showErrorMessage(`AI Chat activation failed: ${error}`);
   }
 }
@@ -60,49 +52,29 @@ class ChatPanel {
     {
       id: 1,
       sender: 'assistant',
-      text: '🤖 AI Chat Assistant\n\nHello! I\'m an AI assistant powered by OpenAPI-compatible inference. I support:\n• Real-time text generation with customizable parameters\n• Fast inference with response timing\n• Persistent conversation context\n• Token usage statistics\n• Compatible with various AI models and backends\n\nWhat would you like to know or discuss?',
+      text: `Backend-powered chat connected to ${BACKEND_URL}.\n\nWhat can I help you with?`,
     },
   ];
   private nextId = 2;
   private serverStatus = 'Checking...';
-  private modelLoaded = false;
+  private backendReady = false;
   private isLoading = false;
-  private sessionId: string = randomUUID();
+  private sessionId = '';
 
   private constructor(private readonly context: vscode.ExtensionContext) {
-    try {
-      console.log('[AI Chat] Creating webview panel...');
-      this.panel = vscode.window.createWebviewPanel(
-        'aiChat',
-        'AI Chat',
-        vscode.ViewColumn.Beside,
-        {
-          enableScripts: true,
-        },
-      );
-      console.log('[AI Chat] Webview panel created');
+    this.panel = vscode.window.createWebviewPanel('aiChat', 'AI Chat', vscode.ViewColumn.Beside, {
+      enableScripts: true,
+    });
 
-      this.panel.onDidDispose(() => this.dispose(), null, this.context.subscriptions);
-      this.panel.webview.onDidReceiveMessage(msg => this.onMessage(msg));
-      console.log('[AI Chat] Setting webview HTML...');
-      this.panel.webview.html = this.renderHtml();
-      console.log('[AI Chat] HTML set, sending initial state...');
-      // Send initial state to webview immediately
-      this.pushState();
-      // Then check server health
-      console.log('[AI Chat] Checking server health...');
-      this.checkServerHealth();
-      console.log('[AI Chat] ChatPanel constructor complete');
-    } catch (err) {
-      console.error('[AI Chat] Error in ChatPanel constructor:', err);
-      throw err;
-    }
+    this.panel.onDidDispose(() => this.dispose(), null, this.context.subscriptions);
+    this.panel.webview.onDidReceiveMessage(msg => this.handleMessage(msg));
+    this.panel.webview.html = this.renderHtml();
+    this.initialize();
   }
 
   static createOrShow(context: vscode.ExtensionContext): void {
     if (ChatPanel.instance) {
       ChatPanel.instance.panel.reveal(vscode.ViewColumn.Beside);
-      ChatPanel.instance.pushState();
       return;
     }
     ChatPanel.instance = new ChatPanel(context);
@@ -116,315 +88,262 @@ class ChatPanel {
     ChatPanel.instance = undefined;
   }
 
-  private async checkServerHealth(): Promise<void> {
-    try {
-      console.log('[AI Chat] Checking health at:', HEALTH_ENDPOINT);
-      // Check health endpoint
-      const healthResponse = await fetch(HEALTH_ENDPOINT, {
-        method: 'GET',
-      });
-      
-      console.log('[AI Chat] Health response status:', healthResponse.status);
-      
-      if (healthResponse.ok) {
-        // Try to parse JSON, but don't fail if it's not valid JSON
-        let healthData: any = {};
-        try {
-          const contentType = healthResponse.headers.get('content-type');
-          if (contentType?.includes('application/json')) {
-            healthData = await healthResponse.json();
-          }
-        } catch (jsonError) {
-          console.log('[AI Chat] Response body is not JSON, that\'s ok');
-          // Response is 200 OK, even if body isn't JSON - server is running
-        }
-        
-        this.modelLoaded = true;
-        const tritonStatus = healthData?.triton_server === 'connected' ? 'connected' : (healthData?.triton_server || 'connected');
-        this.serverStatus = `AI Server: Ready (${MIDDLEWARE_URL})`;
-        console.log('[AI Chat] Server is healthy:', this.serverStatus);
-      } else {
-        console.error('[AI Chat] Health check returned non-200 status:', healthResponse.status);
-        this.serverStatus = 'AI Server: Health check failed';
-        this.modelLoaded = false;
-      }
-    } catch (error) {
-      console.error('[AI Chat] Health check caught error:', error);
-      this.serverStatus = `AI Server: Not reachable (${MIDDLEWARE_URL})`;
-      this.modelLoaded = false;
+  private async initialize(): Promise<void> {
+    await this.checkBackendHealth();
+    if (this.backendReady) {
+      await this.createSession();
     }
     this.pushState();
   }
 
-  private async loadModel(): Promise<void> {
-    // Check server health and available models
-    await this.checkServerHealth();
-    if (this.modelLoaded) {
-      try {
-        const modelsResponse = await fetch(MODELS_ENDPOINT);
-        if (modelsResponse.ok) {
-          const modelsData: any = await modelsResponse.json();
-          const modelsList = modelsData?.data?.map((m: any) => m.id).join(', ') || MODEL_NAME;
-          this.addMessage('assistant', `✓ AI Server ready at ${MIDDLEWARE_URL}\nAvailable models: ${modelsList}`);
-        } else {
-          this.addMessage('assistant', `✓ AI Server ready at ${MIDDLEWARE_URL}`);
-        }
-      } catch (error) {
-        console.error('[AI Chat] Error loading models:', error);
-        this.addMessage('assistant', `✓ AI Server ready at ${MIDDLEWARE_URL}`);
+  private fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs: number = HEALTH_CHECK_TIMEOUT_MS): Promise<Response> {
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs);
+      fetch(url, options)
+        .then(response => {
+          clearTimeout(timeoutId);
+          resolve(response);
+        })
+        .catch(error => {
+          clearTimeout(timeoutId);
+          reject(error);
+        });
+    });
+  }
+
+  private async checkBackendHealth(): Promise<void> {
+    try {
+      const response = await this.fetchWithTimeout(HEALTH_ENDPOINT, { method: 'GET' }, HEALTH_CHECK_TIMEOUT_MS);
+
+      if (response.ok) {
+        const data = (await response.json()) as { mcp_tools_loaded?: number; sessions_active?: number };
+        this.backendReady = true;
+        const mcpCount = data.mcp_tools_loaded ?? 0;
+        const sessionCount = data.sessions_active ?? 0;
+        this.serverStatus = `Ready | MCP: ${mcpCount} | Sessions: ${sessionCount}`;
+      } else {
+        this.serverStatus = `Error (${response.status})`;
+        this.backendReady = false;
       }
-    } else {
-      this.addMessage('assistant', 'Error: AI Server not loaded. Please start the service first.');
+    } catch (error) {
+      this.serverStatus = `Cannot reach ${BACKEND_URL}`;
+      this.backendReady = false;
+      this.addMessage('assistant', 'Cannot connect to backend. Start with: python agent/backend.py');
     }
   }
 
-  private async onMessage(message: { type: string; text?: string; action?: string }): Promise<void> {
-    console.log('[AI Chat] Webview message received:', message);
+  private async createSession(): Promise<void> {
+    try {
+      const response = await this.fetchWithTimeout(CREATE_SESSION_ENDPOINT, { method: 'POST' }, HEALTH_CHECK_TIMEOUT_MS);
+
+      if (response.ok) {
+        const data = (await response.json()) as { session_id?: string };
+        this.sessionId = data.session_id ?? '';
+        this.addMessage('assistant', `Session: ${this.sessionId.substring(0, 12)}...`);
+      } else {
+        throw new Error(`${response.status}`);
+      }
+    } catch (error) {
+      this.addMessage('assistant', `Session error: ${error}`);
+    }
+  }
+
+  private async handleMessage(message: { type?: string; text?: string; action?: string }): Promise<void> {
     if (message.type === 'send' && message.text) {
-      const userMsg: ChatMessage = {
-        id: this.nextId++,
-        sender: 'user',
-        text: message.text.trim(),
-      };
-      if (!userMsg.text) {
-        return;
-      }
-      console.log('[AI Chat] User message:', userMsg.text);
-      this.messages.push(userMsg);
-      this.pushState(); // Show user message immediately
+      await this.sendMessage(message.text);
+      return;
+    }
 
-      if (!this.modelLoaded) {
-        this.addMessage('assistant', 'Error: AI Server not ready. Please start the service first.');
-        this.pushState();
-        return;
+    if (message.action === 'refresh-health') {
+      await this.checkBackendHealth();
+      if (!this.sessionId && this.backendReady) {
+        await this.createSession();
       }
-
-      // Add loading message
-      this.isLoading = true;
-      const loadingMsg: ChatMessage = {
-        id: this.nextId++,
-        sender: 'assistant',
-        text: '⏳ Processing...',
-      };
-      this.messages.push(loadingMsg);
       this.pushState();
+      return;
+    }
 
-      try {
-        const startTime = Date.now();
-        console.log('[AI Chat] Sending OpenAPI request:', userMsg.text);
-        
-        // Build conversation history in OpenAPI format
-        const conversationHistory = this.messages
-          .filter(msg => msg.sender !== 'assistant' || !msg.text.includes('⏳ Processing'))
-          .slice(-10) // Keep last 10 messages for context
-          .map(msg => ({
-            role: msg.sender === 'user' ? 'user' : 'assistant',
-            content: msg.text.replace(/\n\n⏱️ Total: [\d.]+s.*$/, '') // Remove timing info including token stats
-          }));
-        
-        // Build OpenAPI compatible request
-        const openaiRequest = {
-          model: MODEL_NAME,
-          messages: conversationHistory,
-          max_tokens: MAX_TOKENS,
-          temperature: TEMPERATURE,
-          top_p: 0.9,
-          stream: false
-        };
+    if (message.action === 'clear-chat') {
+      await this.clearChat();
+    }
+  }
 
-        const response = await fetch(OPENAI_CHAT_ENDPOINT, {
+  private async sendMessage(userText: string): Promise<void> {
+    const trimmed = userText.trim();
+    if (!trimmed) return;
+
+    this.messages.push({ id: this.nextId++, sender: 'user', text: trimmed });
+    this.pushState();
+
+    if (!this.backendReady) {
+      this.addMessage('assistant', 'Backend not ready');
+      this.pushState();
+      return;
+    }
+
+    if (!this.sessionId) {
+      this.addMessage('assistant', 'No session available');
+      this.pushState();
+      return;
+    }
+
+    this.isLoading = true;
+    this.messages.push({ id: this.nextId++, sender: 'assistant', text: 'Processing...' });
+    this.pushState();
+
+    try {
+      const startTime = Date.now();
+      const response = await this.fetchWithTimeout(
+        CHAT_ENDPOINT,
+        {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(openaiRequest),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`AI server error (${response.status}): ${errorText}`);
-        }
-
-        const responseData = (await response.json()) as any;
-        console.log('[AI Chat] Received OpenAPI response:', responseData);
-        
-        // Extract response text from OpenAPI format
-        const responseText = responseData.choices?.[0]?.message?.content || 'No response received from model';
-        const totalTime = (Date.now() - startTime) / 1000;
-        const usage = responseData.usage;
-        
-        console.log('[AI Chat] Response time:', totalTime, 'Usage:', usage);
-        
-        const displayText = `${responseText}\n\n⏱️ Total: ${totalTime.toFixed(2)}s | Tokens: ${usage?.total_tokens || 'N/A'} (prompt: ${usage?.prompt_tokens || 'N/A'}, completion: ${usage?.completion_tokens || 'N/A'})`;
-        
-        // Remove loading message and add real response
-        this.messages.pop();
-        this.addMessage('assistant', displayText);
-      } catch (error) {
-        console.error('[AI Chat] Error:', error);
-        this.messages.pop();
-        this.addMessage('assistant', `Error: ${error}`);
-      } finally {
-        this.isLoading = false;
-      }
-      this.pushState();
-    } else if (message.action === 'load-model') {
-      await this.loadModel();
-      this.pushState();
-    } else if (message.action === 'clear-chat') {
-      // Reset session ID when clearing chat to start fresh
-      this.sessionId = randomUUID();
-      console.log(`[AI Chat] Chat cleared, new session: ${this.sessionId}`);
-      this.messages = [
-        {
-          id: this.nextId++,
-          sender: 'assistant',
-          text: 'Chat cleared. New session started.',
+          body: JSON.stringify({ message: trimmed, session_id: this.sessionId }),
         },
-      ];
-      this.pushState();
-    } else if (message.action === 'check-health') {
-      console.log('[AI Chat] Checking server health...');
-      await this.checkServerHealth();
-      console.log('[AI Chat] Health check complete:', this.serverStatus);
-      this.addMessage('assistant', `Status: ${this.serverStatus}`);
-      this.pushState();
+        REQUEST_TIMEOUT_MS,
+      );
+
+      if (!response.ok) {
+        throw new Error(`${response.status}`);
+      }
+
+      const data = (await response.json()) as { 
+        response?: string; 
+        context_length?: number; 
+        total_history?: number;
+        message_count?: number;
+        input_length?: number;
+      };
+      const time = ((Date.now() - startTime) / 1000).toFixed(2);
+      const ctxInfo = `⏱️ ${time}s | Context: ${data.context_length ?? 0} msgs (${data.input_length ?? 0} chars) | History: ${data.total_history ?? 0}`;
+      this.messages.pop();
+      this.addMessage('assistant', `${data.response ?? ''}\n\n${ctxInfo}`);
+    } catch (error) {
+      this.messages.pop();
+      this.addMessage('assistant', `Error: ${error}`);
+    } finally {
+      this.isLoading = false;
     }
+
+    this.pushState();
+  }
+
+  private async clearChat(): Promise<void> {
+    if (!this.sessionId) return;
+
+    try {
+      const response = await this.fetchWithTimeout(`${CLEAR_CHAT_ENDPOINT}/${this.sessionId}`, { method: 'POST' }, HEALTH_CHECK_TIMEOUT_MS);
+      if (response.ok) {
+        this.messages = [
+          {
+            id: this.nextId++,
+            sender: 'assistant',
+            text: 'Chat cleared.',
+          },
+        ];
+      }
+    } catch (error) {
+      this.addMessage('assistant', `Clear failed: ${error}`);
+    }
+    this.pushState();
   }
 
   private addMessage(sender: 'user' | 'assistant', text: string): void {
-    this.messages.push({
-      id: this.nextId++,
-      sender,
-      text,
+    this.messages.push({ id: this.nextId++, sender, text });
+  }
+
+  private pushState(): void {
+    this.panel.webview.postMessage({
+      messages: this.messages.slice(-MAX_MESSAGES_IN_UI),
+      status: this.serverStatus,
+      isLoading: this.isLoading,
     });
   }
 
   private renderHtml(): string {
-    const nonce = getNonce();
     return `<!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Chat</title>
+  <meta charset="UTF-8">
   <style>
-    * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; background: #0b1220; color: #e2e8f0; }
-    header { padding: 12px 16px; background: #0f172a; border-bottom: 1px solid #1f2937; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-    .header-title { font-weight: 600; font-size: 14px; }
-    .header-status { font-size: 12px; color: #94a3b8; }
-    .controls { display: flex; gap: 6px; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); display: flex; flex-direction: column; height: 100vh; }
+    header { padding: 12px 16px; border-bottom: 1px solid var(--vscode-widget-border); }
+    .title { font-weight: 600; }
+    .status { font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 4px; }
     #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
-    .bubble { max-width: 85%; padding: 10px 12px; border-radius: 10px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }
-    .assistant { background: #1e293b; align-self: flex-start; }
-    .user { background: #1c3d5a; align-self: flex-end; }
-    form { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; border-top: 1px solid #1f2937; background: #0f172a; }
-    textarea { resize: none; padding: 10px; border-radius: 6px; border: 1px solid #334155; background: #111827; color: #e2e8f0; font-family: inherit; font-size: 14px; }
-    textarea:focus { outline: none; border-color: #2563eb; }
-    .button-group { display: flex; gap: 8px; }
-    button { padding: 8px 12px; border: none; border-radius: 6px; background: #2563eb; color: #f8fafc; font-weight: 600; cursor: pointer; font-size: 13px; flex: 1; }
-    button:hover { background: #1d4ed8; }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
-    button.secondary { background: #334155; }
-    button.secondary:hover { background: #475569; }
+    .msg { padding: 10px 12px; border-radius: 6px; max-width: 85%; white-space: pre-wrap; word-wrap: break-word; }
+    .assistant { background: var(--vscode-textBlockQuote-background); align-self: flex-start; }
+    .user { background: var(--vscode-terminal-selectionBackground); align-self: flex-end; }
+    footer { border-top: 1px solid var(--vscode-widget-border); padding: 12px 16px; display: flex; gap: 8px; }
+    input { flex: 1; padding: 8px 12px; border: 1px solid var(--vscode-input-border); background: var(--vscode-input-background); color: var(--vscode-input-foreground); border-radius: 4px; }
+    input:focus { outline: none; border-color: var(--vscode-focusBorder); }
+    button { padding: 8px 16px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: var(--vscode-button-hoverBackground); }
+    button:disabled { opacity: 0.5; }
   </style>
 </head>
 <body>
   <header>
-    <div>
-      <div class="header-title">🤖 AI Chat</div>
-      <div class="header-status" id="status-text">Checking server...</div>
-    </div>
-    <div class="controls">
-      <button id="health-btn" class="secondary" style="flex: 0 1 auto;">Check Status</button>
-    </div>
+    <div class="title">AI Chat v${CHAT_VERSION}</div>
+    <div class="status" id="status">Connecting...</div>
   </header>
-  <main id="messages" aria-live="polite"></main>
-  <form id="chat-form">
-    <textarea id="chat-input" placeholder="Type a message and press Send..." style="min-height: 60px; max-height: 120px;"></textarea>
-    <div class="button-group">
-      <button type="submit" id="send-btn">Send</button>
-      <button type="button" id="clear-btn" class="secondary">Clear</button>
-    </div>
-  </form>
-  <script nonce="${nonce}">
+  <main id="messages"></main>
+  <footer>
+    <input type="text" id="input" placeholder="Message..." />
+    <button id="send">Send</button>
+    <button id="clear">Clear</button>
+    <button id="refresh">Refresh</button>
+  </footer>
+
+  <script>
     const vscode = acquireVsCodeApi();
-    const messagesEl = document.getElementById('messages');
-    const formEl = document.getElementById('chat-form');
-    const inputEl = document.getElementById('chat-input');
-    const statusEl = document.getElementById('status-text');
-    const sendBtn = document.getElementById('send-btn');
-    const clearBtn = document.getElementById('clear-btn');
-    const healthBtn = document.getElementById('health-btn');
-    
-    console.log('Button elements:', { sendBtn, clearBtn, healthBtn });
+    const msgs = document.getElementById('messages');
+    const input = document.getElementById('input');
+    const status = document.getElementById('status');
+    const send = document.getElementById('send');
+    const clear = document.getElementById('clear');
+    const refresh = document.getElementById('refresh');
 
-    const render = (messages) => {
-      messagesEl.innerHTML = '';
-      messages.forEach(msg => {
+    window.addEventListener('message', e => {
+      const { messages, status: s, isLoading } = e.data;
+      if (s) status.textContent = s;
+      send.disabled = isLoading;
+      input.disabled = isLoading;
+      msgs.innerHTML = '';
+      (messages || []).forEach(msg => {
         const div = document.createElement('div');
-        div.className = 'bubble ' + msg.sender;
+        div.className = 'msg ' + msg.sender;
         div.textContent = msg.text;
-        messagesEl.appendChild(div);
+        msgs.appendChild(div);
       });
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-    };
+      msgs.scrollTop = msgs.scrollHeight;
+    });
 
-    window.addEventListener('message', event => {
-      const { type, messages, serverStatus, modelLoaded, isLoading } = event.data;
-      if (type === 'state') {
-        render(messages ?? []);
-        if (serverStatus !== undefined) {
-          statusEl.textContent = serverStatus;
-        }
-        if (modelLoaded !== undefined || isLoading !== undefined) {
-          sendBtn.disabled = !modelLoaded || isLoading;
-          inputEl.disabled = !modelLoaded || isLoading;
-        }
+    input.addEventListener('keypress', e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        send.click();
       }
     });
 
-    formEl.addEventListener('submit', event => {
-      event.preventDefault();
-      const text = inputEl.value.trim();
-      if (!text) return;
-      inputEl.value = '';
-      vscode.postMessage({ type: 'send', text });
+    send.addEventListener('click', () => {
+      const text = input.value.trim();
+      if (text) {
+        vscode.postMessage({ type: 'send', text });
+        input.value = '';
+      }
     });
 
-    healthBtn.addEventListener('click', () => {
-      console.log('Health button clicked');
-      vscode.postMessage({ action: 'check-health' });
-    });
-
-    clearBtn.addEventListener('click', () => {
-      console.log('Clear button clicked');
+    clear.addEventListener('click', () => {
       vscode.postMessage({ action: 'clear-chat' });
+    });
+
+    refresh.addEventListener('click', () => {
+      vscode.postMessage({ action: 'refresh-health' });
     });
   </script>
 </body>
 </html>`;
   }
-
-  private pushState(): void {
-    // Limit messages to prevent memory issues
-    const messagesToSend = this.messages.slice(-MAX_MESSAGES_IN_UI);
-    
-    this.panel.webview.postMessage({
-      type: 'state',
-      messages: messagesToSend,
-      serverStatus: this.serverStatus,
-      modelLoaded: this.modelLoaded,
-      isLoading: this.isLoading,
-    });
-  }
-}
-
-function getNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
-  for (let i = 0; i < 16; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
 }

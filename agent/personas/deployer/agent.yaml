@@ -1,0 +1,13 @@
+apiVersion: agents/v1
+kind: Agent
+metadata:
+  name: package-deployer
+  labels:
+    app: package-deployer
+    type: autonomous
+spec:
+  goal: package-deployer-goal
+  playbook: null
+  sensors: []
+  tools: []
+  perform_planning: false
