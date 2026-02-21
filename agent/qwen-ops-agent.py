@@ -14,6 +14,24 @@ from qwen_agent.agents import Assistant
 from qwen_agent.tools.base import BaseTool, register_tool 
 from qwen_agent.utils.output_beautify import typewriter_print
 
+# Import Helm tools for Kubernetes package management
+from actions.tools.helm.tools import (
+    HelmAddRepository,
+    HelmRegistryLogin,
+    HelmUpdateRepositories,
+    HelmListRepositories,
+    HelmRemoveRepository,
+    HelmTemplate,
+    HelmLint,
+    HelmInstall,
+    HelmUpgrade,
+    HelmListReleases,
+    HelmGetHistory,
+    HelmGetValues,
+    HelmRollback,
+    HelmUninstall,
+)
+
 class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
     def __init__(
         self,
@@ -53,7 +71,27 @@ class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
             self,
             llm=llm_cfg,
             system_message=goal.description,
-            function_list=[],
+            function_list=[
+                # Helm Repository Management Tools
+                'helm-add-repository',
+                'helm-registry-login',
+                'helm-update-repositories',
+                'helm-list-repositories',
+                'helm-remove-repository',
+                # Helm Chart Validation Tools
+                'helm-template',
+                # 'helm-lint',
+                # Helm Release Management Tools
+                'helm-install',
+                'helm-upgrade',
+                # Helm Release Inspection Tools
+                'helm-list-releases',
+                'helm-get-history',
+                'helm-get-values',
+                # Helm Release Lifecycle Tools
+                'helm-rollback',
+                'helm-uninstall',
+            ],
             files=[]
         )
 
@@ -62,8 +100,7 @@ class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
         prompt = {
             'role': 'user', 
             'content': [
-                {'text': "Consider the following current state"}, 
-                {'text': json.dumps(percepts)}
+                {'text': f"Execute request in accordance to system prompt.\n Act based on the following context.\n {json.dumps([percept['data'] for percept in percepts])}"}, 
             ]
         }
         print(prompt)

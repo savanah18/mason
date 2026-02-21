@@ -28,6 +28,7 @@ geventhttpclient==2.3.7      # HTTP client for gevent
 
 # Agents
 qwen-agent[gui,rag,code_interpreter,mcp]==0.0.33
+pyhelm3==0.4.0
 
 # Standard dependencies
 pydantic==2.12.5
