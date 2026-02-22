@@ -150,6 +150,7 @@ class HelmClient:
         elif namespace:
             args.extend(["-n", namespace])
         
+        args.extend(["--output", "json"])
         result = await self._run_helm(args)
         
         if not result["success"]:
@@ -456,6 +457,7 @@ class HelmClient:
             List of HelmRevision objects
         """
         args = ["history", release_name, "-n", namespace]
+        args.extend(["--output", "json"])
         
         result = await self._run_helm(args)
         
@@ -542,6 +544,7 @@ class HelmClient:
             Values dict
         """
         args = ["get", "values", release_name, "-n", namespace]
+        args.extend(["--output", "json"])
         
         result = await self._run_helm(args)
         

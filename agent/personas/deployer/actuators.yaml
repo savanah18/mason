@@ -1,0 +1,27 @@
+apiVersion: agents/v1
+kind: Actuators
+metadata:
+  name: package-deployer-actuators
+  labels:
+    app: package-deployer-actuators
+    type: autonomous
+spec:
+  mcp-servers:
+    kubernetes:
+      type: "streamable-http"
+      url: "http://localhost:8081/mcp"
+      sse_read_timeout: 5
+  builtin-functions:
+  - "helm-add-repository"
+  - "helm-registry-login"
+  - "helm-update-repositories"
+  - "helm-list-repositories"
+  - "helm-remove-repository"
+  - "helm-template"
+  - "helm-install"
+  - "helm-upgrade"
+  - "helm-list-releases"
+  - "helm-get-history"
+  - "helm-get-values"
+  - "helm-rollback"
+  - "helm-uninstall"

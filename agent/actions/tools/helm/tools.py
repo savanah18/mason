@@ -32,6 +32,32 @@ def run_async(async_func: Callable) -> Any:
         return asyncio.run(async_func())
 
 
+def parse_params(params) -> dict:
+    """
+    Safely parse params which can be either a JSON string or a dict.
+    This handles the case where params might come in as a string or 
+    as an already-parsed dictionary.
+    """
+    if isinstance(params, dict):
+        return params
+    
+    if not params:
+        return {}
+    
+    try:
+        parsed = json5.loads(params) if isinstance(params, str) else params
+        # Ensure result is a dict
+        if isinstance(parsed, dict):
+            return parsed
+        else:
+            # If parsing a string returned something that's not a dict,
+            # wrap it or return empty dict
+            return {}
+    except Exception:
+        # If parsing fails, return empty dict
+        return {}
+
+
 # ============================================================================
 # Repository Management Tools
 # ============================================================================
@@ -71,7 +97,7 @@ class HelmAddRepository(BaseTool):
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
-                args = json5.loads(params)
+                args = parse_params(params)
                 client = HelmClient()
                 
                 success = await client.add_repository(
@@ -130,7 +156,7 @@ class HelmRegistryLogin(BaseTool):
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
-                args = json5.loads(params)
+                args = parse_params(params)
                 client = HelmClient()
 
                 username = args.get('username') or os.getenv('REGISTRY_USERNAME')
@@ -184,7 +210,7 @@ class HelmUpdateRepositories(BaseTool):
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
-                args = json5.loads(params)
+                args = parse_params(params)
                 client = HelmClient()
                 
                 success = await client.update_repository(args.get('repo_name'))
@@ -253,7 +279,7 @@ class HelmRemoveRepository(BaseTool):
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
-                args = json5.loads(params)
+                args = parse_params(params)
                 client = HelmClient()
                 
                 success = await client.remove_repository(args['repo_name'])
@@ -322,7 +348,7 @@ class HelmTemplate(BaseTool):
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
-                args = json5.loads(params)
+                args = parse_params(params)
                 client = HelmClient()
                 
                 values = None
@@ -373,7 +399,7 @@ class HelmLint(BaseTool):
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
-                args = json5.loads(params)
+                args = parse_params(params)
                 client = HelmClient()
                 
                 result = await client.lint(
@@ -447,7 +473,7 @@ class HelmInstall(BaseTool):
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
-                args = json5.loads(params)
+                args = parse_params(params)
                 client = HelmClient()
                 
                 values = None
@@ -532,7 +558,7 @@ class HelmUpgrade(BaseTool):
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
-                args = json5.loads(params)
+                args = parse_params(params)
                 client = HelmClient()
                 
                 values = None
@@ -597,7 +623,7 @@ class HelmListReleases(BaseTool):
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
-                args = json5.loads(params)
+                args = parse_params(params)
                 client = HelmClient()
                 
                 all_ns = args.get('all_namespaces', 'false').lower() == 'true'
@@ -626,6 +652,7 @@ class HelmListReleases(BaseTool):
                     'count': len(releases_data)
                 }, ensure_ascii=False)
             except Exception as e:
+                raise(e)
                 return json5.dumps({
                     'success': False,
                     'error': str(e)
@@ -657,7 +684,7 @@ class HelmGetHistory(BaseTool):
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
-                args = json5.loads(params)
+                args = parse_params(params)
                 client = HelmClient()
                 
                 revisions = await client.get_history(
@@ -714,7 +741,7 @@ class HelmGetValues(BaseTool):
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
-                args = json5.loads(params)
+                args = parse_params(params)
                 client = HelmClient()
                 
                 values = await client.get_values(
@@ -768,7 +795,7 @@ class HelmRollback(BaseTool):
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
-                args = json5.loads(params)
+                args = parse_params(params)
                 client = HelmClient()
                 
                 success = await client.rollback(
@@ -820,7 +847,7 @@ class HelmUninstall(BaseTool):
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
-                args = json5.loads(params)
+                args = parse_params(params)
                 client = HelmClient()
                 
                 success = await client.uninstall(

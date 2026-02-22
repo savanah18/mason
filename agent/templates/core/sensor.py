@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, asdict
 from typing import Any, List, Dict
 import json
+import re
 
 from kafka import KafkaConsumer
 
@@ -29,7 +30,9 @@ class KafkaEventListener(Sensor):
         # Add JSON deserializer for message values
         config['value_deserializer'] = lambda m: json.loads(m.decode('utf-8')) if m else None
         self.consumer = KafkaConsumer(**config)
-        self.consumer.subscribe(topics)
+        # regex based subscription
+        pattern = "(" + "|".join(topics) + ")"
+        self.consumer.subscribe(pattern = re.compile(pattern))
 
     def acquire_percepts(self):
         print("Acquiring percepts from Kafka...")

@@ -8,7 +8,7 @@ class BaseAgent:
     def __init__(self, 
         goal: Goal,
         sensors: List[Sensor],
-        actuators: Any,
+        actuators: List[Any],
         *args,
         **kwargs
     ):

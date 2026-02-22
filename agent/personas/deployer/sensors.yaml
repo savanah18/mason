@@ -14,4 +14,4 @@ spec:
     group_id: null
     auto_offset_reset: latest
     topics:
-    - package.hello-world
+    - package.*

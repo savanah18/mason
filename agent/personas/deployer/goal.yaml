@@ -21,4 +21,5 @@ spec:
     3. Double check existing deployments in the cluster to see if the package is already deployed. If it is, check the version and decide whether to perform an update or skip deployment.
     4. If the package is valid and not already deployed, proceed with the deployment using the `helm install` command. If an update is needed, use the `helm upgrade` command.
     5. After deployment, monitor the status of the deployment to ensure it is successful and troubleshoot any issues that arise.
-    6. Log all actions taken and any errors encountered for auditing and debugging purposes.
+    6. Troubleshoot any issues without user input. Use your tools to debug and resolve issues.
+    7. Log all actions taken and any errors encountered for auditing and debugging purposes.
