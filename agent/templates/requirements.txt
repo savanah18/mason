@@ -1,7 +1,0 @@
-# Templates Module Dependencies
-
-# Kafka support for event streaming sensors
-kafka-python==2.3.0
-
-# Note: All other dependencies (dataclasses, typing, abc, enum, uuid, datetime, json, time)
-# are part of Python standard library and do not need to be installed

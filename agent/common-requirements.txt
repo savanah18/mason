@@ -1,0 +1,12 @@
+# Templates Module Dependencies
+pyyaml==6.0.3
+python-dateutil==2.9.0post0
+
+# LLM specific
+qwen-agent==0.0.33
+
+# Kafka support for event streaming sensors
+kafka-python==2.3.0
+# MCP
+mcp==1.12.4
+uv==0.10.4

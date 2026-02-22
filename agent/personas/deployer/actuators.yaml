@@ -9,7 +9,7 @@ spec:
   mcp-servers:
     kubernetes:
       type: "streamable-http"
-      url: "http://localhost:8081/mcp"
+      url: "http://kubernetes-mcp-server:8081/mcp"
       sse_read_timeout: 5
   builtin-functions:
   - "helm-add-repository"
