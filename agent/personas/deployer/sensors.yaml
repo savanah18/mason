@@ -10,8 +10,8 @@ spec:
   - type: KafkaEventListener
     config_type: KafkaEventListenerConfig
     bootstrap_servers:
-    - kafka-server:9092  # use localhost when running on local server
-    group_id: null
+    - kafka-server:9092
+    group_id: package-deployer
     auto_offset_reset: latest
     topics:
     - package.*

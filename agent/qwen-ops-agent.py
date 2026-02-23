@@ -1,4 +1,5 @@
 
+
 from pathlib import Path
 from typing import Dict, Iterator, List, Literal, Optional, Union, Any
 import yaml
@@ -102,12 +103,13 @@ class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
         finally: 
             return mcp_tools
 
+
     def reason(self, percepts=[]):
         print("Perfoming reasoning.... ")
         prompt = {
             'role': 'user', 
             'content': [
-                {'text': f"Execute request in accordance to system prompt.\n Act based on the following context.\n {json.dumps([percept['data'] for percept in percepts])}"}, 
+                {'text': f"Execute request in accordance to system prompt.\n Act based on the following context.\n {json.dumps([percept['data'] for percept in percepts])}"},
             ]
         }
         self.messages.append(prompt)

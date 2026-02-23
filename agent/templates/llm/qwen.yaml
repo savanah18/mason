@@ -1,5 +1,5 @@
 model: Qwen3-4B-Instruct
-model_server: http://localhost:8001/v1
+model_server: http://main-tensorrt-llm-server:8000/v1
 generate_cfg:
   temperature: 0.8
   top_p: 0.9

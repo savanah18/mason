@@ -55,6 +55,12 @@ services:
       - "8001:8000"
     gpus: all
     <<: *gpu-resources
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
     networks:
       - triton-ai-network
 
@@ -116,16 +122,16 @@ services:
     volumes:
     - ./agent/personas:/app/personas:ro
     command: >
-      python qwen-ops-agent.py 
+      python -u qwen-ops-agent.py 
     networks:
       - triton-ai-network
     depends_on:
       kafka-server:
-        condition: service_healthy
-      main-tensorrt-llm-server:
         condition: service_started
+      # main-tensorrt-llm-server:
+      #   condition: service_healthy
       kubernetes-mcp-server:
-        condition: service_started
+        condition: service_healthy
 
   # MCP and other tools
   kubernetes-mcp-server:
@@ -137,36 +143,57 @@ services:
       KUBECONFIG: /run/secrets/config
     volumes:
     - ./agent/personas:/app/personas:ro
+    - ./agent/templates/llm/qwen.yaml:/app/templates/llm/qwen.yaml:ro
     command: >
      uvx kubernetes-mcp-server@latest --port 8081 --kubeconfig /run/secrets/kubernetes-config 
     # command: >
     #   sleep 6000
     ports:
       - "8081:8081"
-    # healthcheck:
-    #   test: ["CMD", "curl", "-f", "http://localhost:8081/healthz", "||", "exit", "1"]
-    #   interval: 10s
-    #   timeout: 5s
-    #   retries: 5
-    #   start_period: 15s
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
     networks:
       - triton-ai-network
+    extra_hosts: 
+      - "host.docker.internal:host-gateway"
 
   # Memory and State Managements
   ## Episodic
+  kafka-init:
+    image: apache/kafka:4.2.0
+    container_name: kafka-init
+    volumes: 
+     - ./agent/memory/episodic/kafka/data:/tmp/kraft-combined-logs:rw
+     - ./agent/memory/episodic/kafka/config:/opt/kafka/config:rw
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-server:9092
+    command: >
+      bash -c "/opt/kafka/bin/kafka-storage.sh format --config /opt/kafka/config/broker.properties --cluster-id $(/opt/kafka/bin/kafka-storage.sh random-uuid) --ignore-formatted" 
+    networks:
+      - triton-ai-network
+
   kafka-server:
     image: apache/kafka:4.2.0
     container_name: kafka
     volumes: 
-      - ./agent/memory/episodic/kafka/data:/tmp/kraft-combined-logs:rw
+     - ./agent/memory/episodic/kafka/data:/tmp/kraft-combined-logs:rw
+     - ./agent/memory/episodic/kafka/config:/opt/kafka/config:rw
     ports:
       - "9092:9092"
-    healthcheck:
-      test: ["CMD", "bash", "-c", "echo 'test' | nc localhost 9092"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-server:9092
+    command: >
+      bash -c "/opt/kafka/bin/kafka-server-start.sh /opt/kafka/config/broker.properties"
+    # healthcheck:
+    #   test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/9092"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 5
+    #   start_period: 30s
     networks:
       - triton-ai-network
 
