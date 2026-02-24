@@ -105,11 +105,18 @@ class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
 
 
     def reason(self, percepts=[]):
+        # TODO Goal Life Cycle Management
         print("Perfoming reasoning.... ")
         prompt = {
             'role': 'user', 
             'content': [
-                {'text': f"Execute request in accordance to system prompt.\n Act based on the following context.\n {json.dumps([percept['data'] for percept in percepts])}"},
+                {
+                    'text': f"""
+                        {self.goal.base_prompt}
+                        {self.goal.playbook}
+                        {json.dumps([percept['data'] for percept in percepts])}.
+                    """
+                },
             ]
         }
         self.messages.append(prompt)
@@ -118,8 +125,8 @@ class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
         response_plain_text = ''
         for response in self.run(messages=self.messages):
             # Streaming output.
+            print("DEBUG response", response)
             response_plain_text = typewriter_print(response, response_plain_text)
-        # Append the bot responses to the chat history.
         
         # Memory Pruning 
         if self.prune_intermediate_task_contexts:

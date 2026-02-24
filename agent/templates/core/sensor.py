@@ -55,7 +55,10 @@ class KafkaEventListener(Sensor):
                     "offset": message.offset
                 }
             }
-            yield percept
-            self.consumer.commit()
+            print("DEBUG percepts", percept)
+            try:
+                yield percept
+            finally:
+                self.consumer.commit()
             # Return after first message for single-shot acquisition
             return

@@ -17,6 +17,8 @@ class GoalStatus(StrEnum):
 class GoalConfig(FromJsonMixin):
     _id: str = uuid.uuid4()
     description: str = ""
+    base_prompt: str = ""
+    playbook: str = ""
     status: GoalStatus = GoalStatus.PENDING
     updated_at: datetime = datetime.now()
     completed_at: datetime = None

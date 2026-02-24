@@ -120,7 +120,9 @@ services:
       OCI_REGISTRY_SECRET: /run/secrets/oci-registry
       KAFKA_BOOTSTRAP_SERVERS: kafka-server:9092
     volumes:
-    - ./agent/personas:/app/personas:ro
+    - ./agent/personas:/app/personas:rw
+    - ./agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw # for dev purposes only
+    - ./agent/templates:/app/templates:rw
     command: >
       python -u qwen-ops-agent.py 
     networks:
