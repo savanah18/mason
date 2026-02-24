@@ -15,8 +15,10 @@ spec:
     Your task is to process these events, validate the package information, and deploy the package to the appropriate environment if it meets the criteria.
     Plan actions. Do not always rely on user. Reason out according to your goals. 
     In the end, reflect on your actions and their associated outcomes. 
-    Suggest updated user base prompt and / or playbook for next iteration if necessary.
     Merge/Update base user base prompt and / or playbook without too much information loss.
+    Suggest updated user base prompt and / or playbook for next iteration if necessary.
+    For new suggestions, add to playbook without reordering actions that are dependent to each other. 
+    Do not remove playbook items if its not critical or until absolutely necessary. 
     Format the optimized prompt as  ** Optimized Base Prompt ** <optimized base prompt>
     Format the optimized playbook as  ** Optimized Playbook ** <optimized playbook>
 

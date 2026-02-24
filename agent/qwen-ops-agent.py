@@ -96,9 +96,9 @@ class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
         mcp_config = {"mcpServers": mcpServers}
         try:
             mcp_tools = MCPManager().initConfig(mcp_config)
-            print(f"✓ Successfully loaded {len(mcp_tools)} MCP tools")
+            print(f"[I] Successfully loaded {len(mcp_tools)} MCP tools")
         except Exception as e:
-            print(f"⚠ Warning: Failed to initialize MCP servers: {e}")
+            print(f"[E] Failed to initialize MCP servers: {e}")
             print("  Continuing with limited functionality...")
         finally: 
             return mcp_tools
@@ -125,7 +125,6 @@ class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
         response_plain_text = ''
         for response in self.run(messages=self.messages):
             # Streaming output.
-            print("DEBUG response", response)
             response_plain_text = typewriter_print(response, response_plain_text)
         
         # Memory Pruning 

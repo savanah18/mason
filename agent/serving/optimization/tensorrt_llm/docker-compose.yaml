@@ -16,14 +16,15 @@ x-common-env: &common-env
   QUANTIZATION_TYPE: *quant_type
   TENSORRT_ENGINE_PATH: *tensort_engine_path
   TP_SIZE: 1
-  MAX_BATCH_SIZE: 8
-  MAX_INPUT_LENGTH: 2048
-  MAX_OUTPUT_LENGTH: 1024
-
+  MAX_BATCH_SIZE: ${MAX_BATCH_SIZE:-4}
+  MAX_INPUT_LEN: ${MAX_INPUT_LEN:-8192}
+  MAX_SEQ_LEN: ${MAX_SEQ_LEN:-16384}
+  OPT_NUM_TOKENS: ${OPT_NUM_TOKENS:-4096}
+  MAX_NUM_TOKENS: ${MAX_NUM_TOKENS:-8192}
 
 
 services:
-  tensort-llm-converter:
+  tensorrt-llm-converter:
     # build:
     #   context: .
     #   dockerfile: Dockerfile.converter
