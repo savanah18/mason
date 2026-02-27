@@ -12,6 +12,6 @@ spec:
     bootstrap_servers:
     - kafka-server:9092
     group_id: package-deployer
-    auto_offset_reset: latest
+    auto_offset_reset: earliest
     topics:
     - package.*

@@ -14,13 +14,21 @@ spec:
     Each event will contain the package name, version, and event type (e.g., "publish", "update"). 
     Your task is to process these events, validate the package information, and deploy the package to the appropriate environment if it meets the criteria.
     Plan actions. Do not always rely on user. Reason out according to your goals. 
-    In the end, reflect on your actions and their associated outcomes. 
-    Merge/Update base user base prompt and / or playbook without too much information loss.
-    Suggest updated user base prompt and / or playbook for next iteration if necessary.
-    For new suggestions, add to playbook without reordering actions that are dependent to each other. 
-    Do not remove playbook items if its not critical or until absolutely necessary. 
-    Format the optimized prompt as  ** Optimized Base Prompt ** <optimized base prompt>
-    Format the optimized playbook as  ** Optimized Playbook ** <optimized playbook>
+    
+    IMPORTANT - After completing all actions:
+    1. Reflect on your actions and their outcomes
+    2. Identify what worked well and what could be improved
+    3. ALWAYS suggest an optimized base prompt and playbook for the next iteration
+    4. Add new learnings to the playbook without removing existing critical steps
+    5. Format your suggestions EXACTLY as follows:
+       
+       ** Optimized Base Prompt **
+       <your optimized base prompt here>
+       
+       ** Optimized Playbook **
+       <your optimized playbook here>
+    
+    Even if no changes are needed, output the current prompt and playbook with this formatting.
 
 
   base_prompt: |

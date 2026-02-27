@@ -12,8 +12,11 @@ python3 /app/tensorrt_llm/examples/models/core/qwen/convert_checkpoint.py \
     # --use_weight_only \
     # --weight_only_precision ${QUANTIZATION_TYPE}
 
-# Override default seq len
-jq --argjson seq_length "$MAX_SEQ_LEN" '.seq_length = $seq_length' \
+# Override default seq len and token limits
+jq --argjson seq_length "$MAX_SEQ_LEN" \
+   --argjson max_input_len "$MAX_INPUT_LEN" \
+   --argjson max_num_tokens "$MAX_NUM_TOKENS" \
+   '.seq_length = $seq_length | .max_input_len = $max_input_len | .max_num_tokens = $max_num_tokens' \
     ${TENSORRT_LLM_CKPT}/config.json > ${TENSORRT_LLM_CKPT}/config_tmp.json && \
     mv ${TENSORRT_LLM_CKPT}/config_tmp.json ${TENSORRT_LLM_CKPT}/config.json
 

@@ -37,7 +37,7 @@ services:
   # LLM 
   ## Development Server for TensorRT-LLM
   main-tensorrt-llm-server:
-    image: nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc0
+    image: nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc5
     container_name: main-tensorrt-llm-server
     volumes:
     - source: *host_serving_model_path
@@ -116,9 +116,11 @@ services:
     container_name: deployer-agent
     secrets: 
     - oci-registry 
+    - kubernetes-config
     environment: 
       OCI_REGISTRY_SECRET: /run/secrets/oci-registry
       KAFKA_BOOTSTRAP_SERVERS: kafka-server:9092
+      KUBECONFIG: /run/secrets/kubernetes-config
     volumes:
     - ./agent/personas:/app/personas:rw
     - ./agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw # for dev purposes only

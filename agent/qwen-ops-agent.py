@@ -81,21 +81,27 @@ class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
         )
         
         # Initialize Assistant (Qwen)
-        mcp_tools = self.configure_mcp_tools(actuators['mcp-servers']) if actuators else []
+        exclude_tools = actuators['exclude-tools']
+        mcp_tools = self.configure_mcp_tools(actuators['mcp-servers'], exclude_tools) if actuators else []
         function_tools = actuators['builtin-functions'] if actuators else []
+        
+        # Combine goal description, base_prompt, and playbook into system message
+        system_message = f"{goal.description}"
+        
         Assistant.__init__(
             self,
             llm=llm_cfg,
-            system_message=goal.description,
+            system_message=system_message,
             function_list= function_tools + mcp_tools,
             files=[]
         )
 
-    def configure_mcp_tools(self, mcpServers: dict ={}):
+    def configure_mcp_tools(self, mcpServers: dict ={}, exclude_tools: List[Any] = []):
         mcp_tools = []
         mcp_config = {"mcpServers": mcpServers}
         try:
             mcp_tools = MCPManager().initConfig(mcp_config)
+            mcp_tools = [t for t in mcp_tools if t.name not in exclude_tools]
             print(f"[I] Successfully loaded {len(mcp_tools)} MCP tools")
         except Exception as e:
             print(f"[E] Failed to initialize MCP servers: {e}")
