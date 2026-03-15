@@ -26,7 +26,7 @@ certs/
 certificates/
 
 # Data directories
-data/
+**data/
 
 # Rust build artifacts
 *target/
@@ -48,3 +48,8 @@ agent/serving/triton/models/**/*.engine
 agent/serving/triton/models/**/*.json
 agent/serving/triton/models/**/*.safetensors
 agent/serving/optimization/old_pipeline_archive/
+agent/memory/**
+
+
+# Secrest
+*.secrets/**

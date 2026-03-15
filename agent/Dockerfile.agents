@@ -1,0 +1,36 @@
+FROM python:3.12 as build-stage
+
+# Install prerequisites
+RUN apt-get update && apt-get install -y \
+    curl \
+    tar \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Helm (latest release)
+RUN curl -fsSL https://get.helm.sh/helm-v4.0.0-linux-amd64.tar.gz -o helm.tar.gz \
+    && tar -zxvf helm.tar.gz \
+    && mv linux-amd64/helm /usr/local/bin/helm \
+    && rm -rf linux-amd64 helm.tar.gz
+# Verify installation
+RUN helm version
+
+
+
+COPY ./common-requirements.txt ./requirements.txt
+
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install -r requirements.txt && \
+    rm -rf ./requirements.txt
+
+FROM build-stage as production-stage
+WORKDIR /app
+COPY ./entrypoint.sh ./
+COPY ./qwen-ops-agent.py ./qwen-ops-agent.py
+COPY --from=templates ./ ./templates
+COPY --from=actions ./ ./actions
+
+# Install needed mcp servers
+RUN uvx kubernetes-mcp-server@latest -h
+
+ENTRYPOINT ["/app/entrypoint.sh"]

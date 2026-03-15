@@ -1,0 +1,13 @@
+apiVersion: agents/v1
+kind: Agent
+metadata:
+  name: resiliency-optimizer
+  labels:
+    app: resiliency-optimizer
+    type: autonomous
+spec:
+  goal: resiliency-optimizer-goal
+  playbook: null
+  sensors: []
+  tools: []
+  perform_planning: false

@@ -1,0 +1,17 @@
+# High Level Objectives
+apiVersion: agents/v1
+kind: Goal
+metadata:
+  name: package-deployer-sensors
+  labels:
+    app: package-deployer-sensors
+    type: autonomous
+spec:
+  - type: KafkaEventListener
+    config_type: KafkaEventListenerConfig
+    bootstrap_servers:
+    - kafka-server:9092
+    group_id: package-deployer
+    auto_offset_reset: earliest
+    topics:
+    - package.*

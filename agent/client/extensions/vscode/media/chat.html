@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="__CSP__">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="__STYLE_URI__">
+  <title>AI Chat</title>
+</head>
+<body>
+  <header>
+    <div class="title">AI Chat v__CHAT_VERSION__</div>
+    <div class="status" id="status">Connecting...</div>
+  </header>
+  <main id="messages"></main>
+  <footer>
+    <textarea id="input" placeholder="Message... (Shift+Enter for newline)" rows="1"></textarea>
+    <button id="send">Send</button>
+    <button id="clear">Clear</button>
+    <button id="refresh">Refresh</button>
+  </footer>
+
+  <script nonce="__NONCE__" src="__MARKED_URI__"></script>
+  <script nonce="__NONCE__" src="__SCRIPT_URI__"></script>
+</body>
+</html>

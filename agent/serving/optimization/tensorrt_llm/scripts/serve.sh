@@ -4,10 +4,11 @@ EXTRA_LLM_API_FILE=${TRTLLM_DIR}/examples/configs/curated/qwen3.yaml
 
 trtllm-serve serve  \
     --backend tensorrt \
-    --max_batch_size 1 \
+    --max_batch_size ${MAX_BATCH_SIZE:-1} \
+    --max_seq_len ${MAX_SEQ_LEN:-32768} \
+    --max_num_tokens ${MAX_NUM_TOKENS:-32768} \
     --tokenizer /app/tensorrt_llm/tokenizer/  \
     --port 8000 \
     --host 0.0.0.0 \
-    /app/tensorrt_llm/models/qwen3/1/
-    # --tokenizer /app/tensorrt_llm/models/qwen3/1/tokenizer/tokenizer.json  \
-    # /app/tensorrt_llm/models/qwen3-tensorrtllm/1/rank0.engine  
+    --enable_chunked_prefill \
+    /app/tensorrt_llm/models/qwen3/2/
