@@ -1,4 +1,4 @@
-FROM python:3.12 as build-stage
+FROM python:3.12 AS build-stage
 
 # Install prerequisites
 RUN apt-get update && apt-get install -y \
@@ -23,7 +23,7 @@ RUN pip install --upgrade pip setuptools wheel && \
     pip install -r requirements.txt && \
     rm -rf ./requirements.txt
 
-FROM build-stage as production-stage
+FROM build-stage AS production-stage
 WORKDIR /app
 COPY ./entrypoint.sh ./
 COPY ./qwen-ops-agent.py ./qwen-ops-agent.py

@@ -1,0 +1,22 @@
+apiVersion: agents/v1
+kind: Actuators
+metadata:
+  name: chat-actuators
+  labels:
+    app: chat-actuators
+    type: autonomous
+spec:
+  mcp-servers:
+    kubernetes:
+      type: "streamable-http"
+      url: "http://kubernetes-mcp-server:8081/mcp"
+      sse_read_timeout: 30
+    litmuschaos:
+      command: "/app/actions/mcp/servers/litmus-chaos/litmuschaos-mcp-server" 
+      args: []
+      env:
+        CHAOS_CENTER_ENDPOINT: "http://172.25.152.192:32630"
+        LITMUS_PROJECT_ID: "dadfe41f-505e-4023-bcbf-8e3b6033374c"
+        LITMUS_ACCESS_TOKEN: "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJleHAiOjQ5MjcxMzYyMTQsInJvbGUiOiJhZG1pbiIsInVpZCI6IjEzMDk0NTg0LTE3M2YtNDRhMy1hNDFjLTcyN2NkMWFiYzBmNCIsInVzZXJuYW1lIjoiYWRtaW4ifQ.crBvQ6Pv2ss6QTsnZ-Sih_QfMqlLq6eu10k4X2PhYyi_HdXwDge6mhhAEK-amtbMRGHLq3IEmUqfhULNZw-RGQ"
+  builtin-functions:
+  - "kafka-produce-message"

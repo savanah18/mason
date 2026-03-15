@@ -5,6 +5,9 @@ python-dateutil==2.9.0post0
 # LLM specific
 qwen-agent==0.0.33
 
+# REST APIS
+fastapi==0.128.0
+
 # Kafka support for event streaming sensors
 kafka-python==2.3.0
 # MCP
