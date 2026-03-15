@@ -2,7 +2,7 @@
   "name": "ai-chat-assistant",
   "displayName": "AI Chat Assistant",
   "description": "OpenAPI-compatible AI chat assistant with support for various inference backends including TensorRT-LLM, vLLM, OpenAI, and more.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "your-publisher",
   "engines": {
     "vscode": "^1.87.0"
@@ -28,7 +28,8 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
+    "prepare-media": "node -e \"const fs=require('fs'); fs.mkdirSync('media/vendor',{recursive:true}); fs.copyFileSync('node_modules/marked/lib/marked.umd.js','media/vendor/marked.umd.js');\"",
+    "compile": "npm run prepare-media && tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "echo 'No lint configured'",
     "package": "vsce package || echo 'Install vsce to package'"
@@ -37,5 +38,8 @@
     "@types/node": "^20.10.0",
     "@types/vscode": "^1.87.0",
     "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "marked": "^17.0.4"
   }
 }

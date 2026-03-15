@@ -1,15 +1,17 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 
 type ChatMessage = { id: number; sender: 'user' | 'assistant'; text: string };
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8002';
-const CHAT_VERSION = '0.4.0';
+const CHAT_VERSION = '0.4.1';
 const CHAT_ENDPOINT = `${BACKEND_URL}/chat/send`;
 const HEALTH_ENDPOINT = `${BACKEND_URL}/health`;
 const CREATE_SESSION_ENDPOINT = `${BACKEND_URL}/session/create`;
 const CLEAR_CHAT_ENDPOINT = `${BACKEND_URL}/chat/clear`;
 const MAX_MESSAGES_IN_UI = 100;
-const REQUEST_TIMEOUT_MS = 60000;
+const REQUEST_TIMEOUT_MS = 180000;
 const HEALTH_CHECK_TIMEOUT_MS = 5000;
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -48,6 +50,7 @@ export function deactivate(): void {
 class ChatPanel {
   private static instance: ChatPanel | undefined;
   private readonly panel: vscode.WebviewPanel;
+  private webviewReady = false;
   private messages: ChatMessage[] = [
     {
       id: 1,
@@ -64,11 +67,13 @@ class ChatPanel {
   private constructor(private readonly context: vscode.ExtensionContext) {
     this.panel = vscode.window.createWebviewPanel('aiChat', 'AI Chat', vscode.ViewColumn.Beside, {
       enableScripts: true,
+      localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')],
     });
 
     this.panel.onDidDispose(() => this.dispose(), null, this.context.subscriptions);
     this.panel.webview.onDidReceiveMessage(msg => this.handleMessage(msg));
     this.panel.webview.html = this.renderHtml();
+
     this.initialize();
   }
 
@@ -149,6 +154,19 @@ class ChatPanel {
   }
 
   private async handleMessage(message: { type?: string; text?: string; action?: string }): Promise<void> {
+    if (message.action === 'webview-ready') {
+      this.webviewReady = true;
+      this.pushState();
+      return;
+    }
+
+    if (message.action === 'webview-error' && message.text) {
+      vscode.window.showErrorMessage(`AI Chat Webview: ${message.text}`);
+      this.addMessage('assistant', `Webview error: ${message.text}`);
+      this.pushState();
+      return;
+    }
+
     if (message.type === 'send' && message.text) {
       await this.sendMessage(message.text);
       return;
@@ -215,7 +233,7 @@ class ChatPanel {
         input_length?: number;
       };
       const time = ((Date.now() - startTime) / 1000).toFixed(2);
-      const ctxInfo = `⏱️ ${time}s | Context: ${data.context_length ?? 0} msgs (${data.input_length ?? 0} chars) | History: ${data.total_history ?? 0}`;
+      const ctxInfo = `Latency: ${time}s | Context: ${data.context_length ?? 0} messages | Input size: ${data.input_length ?? 0} chars | History: ${data.total_history ?? 0}`;
       this.messages.pop();
       this.addMessage('assistant', `${data.response ?? ''}\n\n${ctxInfo}`);
     } catch (error) {
@@ -260,90 +278,40 @@ class ChatPanel {
     });
   }
 
+  private getMediaUri(fileName: string): string {
+    const mediaUri = vscode.Uri.joinPath(this.context.extensionUri, 'media', fileName);
+    return this.panel.webview.asWebviewUri(mediaUri).toString();
+  }
+
+  private getNonce(): string {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let nonce = '';
+    for (let i = 0; i < 32; i += 1) {
+      nonce += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return nonce;
+  }
+
   private renderHtml(): string {
-    return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); display: flex; flex-direction: column; height: 100vh; }
-    header { padding: 12px 16px; border-bottom: 1px solid var(--vscode-widget-border); }
-    .title { font-weight: 600; }
-    .status { font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 4px; }
-    #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
-    .msg { padding: 10px 12px; border-radius: 6px; max-width: 85%; white-space: pre-wrap; word-wrap: break-word; }
-    .assistant { background: var(--vscode-textBlockQuote-background); align-self: flex-start; }
-    .user { background: var(--vscode-terminal-selectionBackground); align-self: flex-end; }
-    footer { border-top: 1px solid var(--vscode-widget-border); padding: 12px 16px; display: flex; gap: 8px; }
-    input { flex: 1; padding: 8px 12px; border: 1px solid var(--vscode-input-border); background: var(--vscode-input-background); color: var(--vscode-input-foreground); border-radius: 4px; }
-    input:focus { outline: none; border-color: var(--vscode-focusBorder); }
-    button { padding: 8px 16px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 4px; cursor: pointer; }
-    button:hover { background: var(--vscode-button-hoverBackground); }
-    button:disabled { opacity: 0.5; }
-  </style>
-</head>
-<body>
-  <header>
-    <div class="title">AI Chat v${CHAT_VERSION}</div>
-    <div class="status" id="status">Connecting...</div>
-  </header>
-  <main id="messages"></main>
-  <footer>
-    <input type="text" id="input" placeholder="Message..." />
-    <button id="send">Send</button>
-    <button id="clear">Clear</button>
-    <button id="refresh">Refresh</button>
-  </footer>
+    const nonce = this.getNonce();
+    const templatePath = path.join(this.context.extensionPath, 'media', 'chat.html');
+    const template = fs.readFileSync(templatePath, 'utf8');
+    const styleUri = this.getMediaUri('chat.css');
+    const markedUri = this.getMediaUri('vendor/marked.umd.js');
+    const scriptUri = this.getMediaUri('chat.js');
+    const csp = [
+      "default-src 'none'",
+      `style-src ${this.panel.webview.cspSource}`,
+      `script-src 'nonce-${nonce}'`,
+      `connect-src ${this.panel.webview.cspSource}`,
+    ].join('; ');
 
-  <script>
-    const vscode = acquireVsCodeApi();
-    const msgs = document.getElementById('messages');
-    const input = document.getElementById('input');
-    const status = document.getElementById('status');
-    const send = document.getElementById('send');
-    const clear = document.getElementById('clear');
-    const refresh = document.getElementById('refresh');
-
-    window.addEventListener('message', e => {
-      const { messages, status: s, isLoading } = e.data;
-      if (s) status.textContent = s;
-      send.disabled = isLoading;
-      input.disabled = isLoading;
-      msgs.innerHTML = '';
-      (messages || []).forEach(msg => {
-        const div = document.createElement('div');
-        div.className = 'msg ' + msg.sender;
-        div.textContent = msg.text;
-        msgs.appendChild(div);
-      });
-      msgs.scrollTop = msgs.scrollHeight;
-    });
-
-    input.addEventListener('keypress', e => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        send.click();
-      }
-    });
-
-    send.addEventListener('click', () => {
-      const text = input.value.trim();
-      if (text) {
-        vscode.postMessage({ type: 'send', text });
-        input.value = '';
-      }
-    });
-
-    clear.addEventListener('click', () => {
-      vscode.postMessage({ action: 'clear-chat' });
-    });
-
-    refresh.addEventListener('click', () => {
-      vscode.postMessage({ action: 'refresh-health' });
-    });
-  </script>
-</body>
-</html>`;
+    return template
+      .replace(/__CHAT_VERSION__/g, CHAT_VERSION)
+      .replace(/__CSP__/g, csp)
+      .replace(/__STYLE_URI__/g, styleUri)
+      .replace(/__MARKED_URI__/g, markedUri)
+      .replace(/__SCRIPT_URI__/g, scriptUri)
+      .replace(/__NONCE__/g, nonce);
   }
 }
