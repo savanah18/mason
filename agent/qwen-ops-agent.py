@@ -1,5 +1,4 @@
-
-
+import os
 from pathlib import Path
 from typing import Dict, Iterator, List, Literal, Optional, Union, Any
 import yaml
@@ -15,6 +14,8 @@ from qwen_agent.agents import Assistant
 from qwen_agent.tools.base import BaseTool, register_tool 
 from qwen_agent.tools.mcp_manager import MCPManager
 from qwen_agent.utils.output_beautify import typewriter_print
+
+PERSONA = os.getenv("PERSONA","deployer")
 
 # Import Helm tools for Kubernetes package management
 from actions.tools.helm.tools import (
@@ -66,7 +67,7 @@ class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
                 actuators = data['spec']
 
 
-        print(f"[I] Initializing deployer agent with goal \n {goal.description}")
+        print(f"[I] Initializing {PERSONA} agent with goal \n {goal.description}")
         print(f"[I] Configuring llm client ... \n{llm_cfg}")
         if prune_intermediate_task_contexts:
             print(f"[W] Prune Intermediate task contexts enabled...")
@@ -141,10 +142,10 @@ class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
 
 if __name__ == "__main__":
     agent = QwenOpsAgent(
-        goal = "./personas/deployer/goal.yaml",
-        sensors = "./personas/deployer/sensors.yaml",
+        goal = f"./personas/{PERSONA}/goal.yaml",
+        sensors = f"./personas/{PERSONA}/sensors.yaml",
         llm_cfg = "./templates/llm/qwen.yaml",
-        actuators = "./personas/deployer/actuators.yaml",
+        actuators = f"./personas/{PERSONA}/actuators.yaml",
         prune_intermediate_task_contexts = True
     )
     agent.launch()
