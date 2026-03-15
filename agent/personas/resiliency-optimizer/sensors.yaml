@@ -1,0 +1,18 @@
+# Event Sensors
+apiVersion: agents/v1
+kind: Goal
+metadata:
+  name: resiliency-optimizer-sensors
+  labels:
+    app: resiliency-optimizer-sensors
+    type: autonomous
+spec:
+  - type: KafkaEventListener
+    config_type: KafkaEventListenerConfig
+    bootstrap_servers:
+    - kafka-server:9092
+    group_id: resiliency-optimizer
+    auto_offset_reset: latest
+    topics:
+    - chaos.metrics.normal.*
+    - chaos.metrics.accelerated.*
