@@ -11,6 +11,14 @@ from qwen_agent.tools.base import BaseTool, register_tool
 from .helm_client import HelmClient
 
 
+EXECUTION_ID_PARAMETER = {
+    'name': 'execution_id',
+    'type': 'string',
+    'description': 'Optional execution ID supplied by the orchestrator for attestation',
+    'required': False,
+}
+
+
 def run_async(async_func: Callable) -> Any:
     """
     Helper to run async functions from sync context.
@@ -58,6 +66,15 @@ def parse_params(params) -> dict:
         return {}
 
 
+def tool_response(payload: dict, execution_id: Optional[str] = None) -> str:
+    """Attach execution attestation fields to a tool response."""
+    response = dict(payload)
+    if execution_id:
+        response['execution_id'] = execution_id
+        response['execution_attested'] = bool(response.get('success'))
+    return json5.dumps(response, ensure_ascii=False)
+
+
 # ============================================================================
 # Repository Management Tools
 # ============================================================================
@@ -91,13 +108,15 @@ class HelmAddRepository(BaseTool):
             'type': 'string',
             'description': 'Optional: Password for authentication',
             'required': False
-        }
+        },
+        EXECUTION_ID_PARAMETER,
     ]
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
                 args = parse_params(params)
+                execution_id = args.get('execution_id')
                 client = HelmClient()
                 
                 success = await client.add_repository(
@@ -109,20 +128,20 @@ class HelmAddRepository(BaseTool):
                 )
                 
                 if success:
-                    return json5.dumps({
+                    return tool_response({
                         'success': True,
                         'message': f"Repository '{args['repo_name']}' added/updated successfully"
-                    }, ensure_ascii=False)
+                    }, execution_id)
                 else:
-                    return json5.dumps({
+                    return tool_response({
                         'success': False,
                         'message': f"Failed to add repository '{args['repo_name']}'"
-                    }, ensure_ascii=False)
+                    }, execution_id)
             except Exception as e:
-                return json5.dumps({
+                return tool_response({
                     'success': False,
                     'error': str(e)
-                }, ensure_ascii=False)
+                }, execution_id if 'execution_id' in locals() else None)
         
         return run_async(_async_call)
 
@@ -151,22 +170,24 @@ class HelmRegistryLogin(BaseTool):
         #     'description': 'Registry password or token (defaults to env REGISTRY_PASSWORD)',
         #     'required': False
         # }
+        EXECUTION_ID_PARAMETER,
     ]
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
                 args = parse_params(params)
+                execution_id = args.get('execution_id')
                 client = HelmClient()
 
                 username = args.get('username') or os.getenv('REGISTRY_USERNAME')
                 password = args.get('password') or os.getenv('REGISTRY_PASSWORD')
 
                 if not username or not password:
-                    return json5.dumps({
+                    return tool_response({
                         'success': False,
                         'error': 'Missing registry credentials: set REGISTRY_USERNAME and REGISTRY_PASSWORD or pass username/password'
-                    }, ensure_ascii=False)
+                    }, execution_id)
                 
                 success = await client.registry_login(
                     registry=args['registry'],
@@ -175,20 +196,20 @@ class HelmRegistryLogin(BaseTool):
                 )
                 
                 if success:
-                    return json5.dumps({
+                    return tool_response({
                         'success': True,
                         'message': f"Registry '{args['registry']}' login succeeded"
-                    }, ensure_ascii=False)
+                    }, execution_id)
                 else:
-                    return json5.dumps({
+                    return tool_response({
                         'success': False,
                         'message': f"Registry '{args['registry']}' login failed"
-                    }, ensure_ascii=False)
+                    }, execution_id)
             except Exception as e:
-                return json5.dumps({
+                return tool_response({
                     'success': False,
                     'error': str(e)
-                }, ensure_ascii=False)
+                }, execution_id if 'execution_id' in locals() else None)
         
         return run_async(_async_call)
 
@@ -204,33 +225,35 @@ class HelmUpdateRepositories(BaseTool):
             'type': 'string',
             'description': 'Optional: Specific repository to update. If empty, updates all repositories',
             'required': False
-        }
+        },
+        EXECUTION_ID_PARAMETER,
     ]
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
                 args = parse_params(params)
+                execution_id = args.get('execution_id')
                 client = HelmClient()
                 
                 success = await client.update_repository(args.get('repo_name'))
                 
                 if success:
                     target = args.get('repo_name') or 'all repositories'
-                    return json5.dumps({
+                    return tool_response({
                         'success': True,
                         'message': f"{target} updated successfully"
-                    }, ensure_ascii=False)
+                    }, execution_id)
                 else:
-                    return json5.dumps({
+                    return tool_response({
                         'success': False,
                         'message': f"Failed to update repositories"
-                    }, ensure_ascii=False)
+                    }, execution_id)
             except Exception as e:
-                return json5.dumps({
+                return tool_response({
                     'success': False,
                     'error': str(e)
-                }, ensure_ascii=False)
+                }, execution_id if 'execution_id' in locals() else None)
         
         return run_async(_async_call)
 
@@ -240,24 +263,26 @@ class HelmListRepositories(BaseTool):
     """List all configured Helm repositories."""
     
     description = 'List all Helm chart repositories currently configured.'
-    parameters = []
+    parameters = [EXECUTION_ID_PARAMETER]
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
+                args = parse_params(params)
+                execution_id = args.get('execution_id')
                 client = HelmClient()
                 repos = await client.list_repositories()
                 
-                return json5.dumps({
+                return tool_response({
                     'success': True,
                     'repositories': repos,
                     'count': len(repos)
-                }, ensure_ascii=False)
+                }, execution_id)
             except Exception as e:
-                return json5.dumps({
+                return tool_response({
                     'success': False,
                     'error': str(e)
-                }, ensure_ascii=False)
+                }, execution_id if 'execution_id' in locals() else None)
         
         return run_async(_async_call)
 
@@ -273,32 +298,34 @@ class HelmRemoveRepository(BaseTool):
             'type': 'string',
             'description': 'Name of the repository to remove',
             'required': True
-        }
+        },
+        EXECUTION_ID_PARAMETER,
     ]
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
                 args = parse_params(params)
+                execution_id = args.get('execution_id')
                 client = HelmClient()
                 
                 success = await client.remove_repository(args['repo_name'])
                 
                 if success:
-                    return json5.dumps({
+                    return tool_response({
                         'success': True,
                         'message': f"Repository '{args['repo_name']}' removed successfully"
-                    }, ensure_ascii=False)
+                    }, execution_id)
                 else:
-                    return json5.dumps({
+                    return tool_response({
                         'success': False,
                         'message': f"Failed to remove repository '{args['repo_name']}'"
-                    }, ensure_ascii=False)
+                    }, execution_id)
             except Exception as e:
-                return json5.dumps({
+                return tool_response({
                     'success': False,
                     'error': str(e)
-                }, ensure_ascii=False)
+                }, execution_id if 'execution_id' in locals() else None)
         
         return run_async(_async_call)
 
@@ -342,13 +369,15 @@ class HelmTemplate(BaseTool):
             'type': 'string',
             'description': 'JSON string of values to override (e.g., \'{"replicas": 3, "image": {"tag": "1.2.0"}}\')',
             'required': False
-        }
+        },
+        EXECUTION_ID_PARAMETER,
     ]
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
                 args = parse_params(params)
+                execution_id = args.get('execution_id')
                 client = HelmClient()
                 
                 values = None
@@ -363,15 +392,15 @@ class HelmTemplate(BaseTool):
                     version=args.get('version')
                 )
                 
-                return json5.dumps({
+                return tool_response({
                     'success': True,
                     'manifests': manifests
-                }, ensure_ascii=False)
+                }, execution_id)
             except Exception as e:
-                return json5.dumps({
+                return tool_response({
                     'success': False,
                     'error': str(e)
-                }, ensure_ascii=False)
+                }, execution_id if 'execution_id' in locals() else None)
         
         return run_async(_async_call)
 
@@ -393,13 +422,15 @@ class HelmLint(BaseTool):
             'type': 'string',
             'description': 'Optional chart version for repo or OCI charts',
             'required': False
-        }
+        },
+        EXECUTION_ID_PARAMETER,
     ]
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
                 args = parse_params(params)
+                execution_id = args.get('execution_id')
                 client = HelmClient()
                 
                 result = await client.lint(
@@ -407,17 +438,17 @@ class HelmLint(BaseTool):
                     version=args.get('version')
                 )
                 
-                return json5.dumps({
+                return tool_response({
                     'success': result.get('success', False),
                     'errors': result.get('errors', []),
                     'warnings': result.get('warnings', []),
                     'output': result.get('raw_output', '')
-                }, ensure_ascii=False)
+                }, execution_id)
             except Exception as e:
-                return json5.dumps({
+                return tool_response({
                     'success': False,
                     'error': str(e)
-                }, ensure_ascii=False)
+                }, execution_id if 'execution_id' in locals() else None)
         
         return run_async(_async_call)
 
@@ -467,13 +498,15 @@ class HelmInstall(BaseTool):
             'type': 'string',
             'description': 'Create namespace if it does not exist (true/false, default: true)',
             'required': False
-        }
+        },
+        EXECUTION_ID_PARAMETER,
     ]
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
                 args = parse_params(params)
+                execution_id = args.get('execution_id')
                 client = HelmClient()
                 
                 values = None
@@ -493,20 +526,20 @@ class HelmInstall(BaseTool):
                 )
                 
                 if success:
-                    return json5.dumps({
+                    return tool_response({
                         'success': True,
                         'message': f"Release '{args['release_name']}' installed successfully"
-                    }, ensure_ascii=False)
+                    }, execution_id)
                 else:
-                    return json5.dumps({
+                    return tool_response({
                         'success': False,
                         'message': f"Failed to install release '{args['release_name']}'"
-                    }, ensure_ascii=False)
+                    }, execution_id)
             except Exception as e:
-                return json5.dumps({
+                return tool_response({
                     'success': False,
                     'error': str(e)
-                }, ensure_ascii=False)
+                }, execution_id if 'execution_id' in locals() else None)
         
         return run_async(_async_call)
 
@@ -552,13 +585,15 @@ class HelmUpgrade(BaseTool):
             'type': 'string',
             'description': 'Install if release does not exist (true/false, default: true)',
             'required': False
-        }
+        },
+        EXECUTION_ID_PARAMETER,
     ]
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
                 args = parse_params(params)
+                execution_id = args.get('execution_id')
                 client = HelmClient()
                 
                 values = None
@@ -578,20 +613,20 @@ class HelmUpgrade(BaseTool):
                 )
                 
                 if success:
-                    return json5.dumps({
+                    return tool_response({
                         'success': True,
                         'message': f"Release '{args['release_name']}' upgraded successfully"
-                    }, ensure_ascii=False)
+                    }, execution_id)
                 else:
-                    return json5.dumps({
+                    return tool_response({
                         'success': False,
                         'message': f"Failed to upgrade release '{args['release_name']}'"
-                    }, ensure_ascii=False)
+                    }, execution_id)
             except Exception as e:
-                return json5.dumps({
+                return tool_response({
                     'success': False,
                     'error': str(e)
-                }, ensure_ascii=False)
+                }, execution_id if 'execution_id' in locals() else None)
         
         return run_async(_async_call)
 
@@ -617,13 +652,15 @@ class HelmListReleases(BaseTool):
             'type': 'string',
             'description': 'List releases from all namespaces (true/false, default: false)',
             'required': False
-        }
+        },
+        EXECUTION_ID_PARAMETER,
     ]
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
                 args = parse_params(params)
+                execution_id = args.get('execution_id')
                 client = HelmClient()
                 
                 all_ns = args.get('all_namespaces', 'false').lower() == 'true'
@@ -646,17 +683,17 @@ class HelmListReleases(BaseTool):
                     for r in releases
                 ]
                 
-                return json5.dumps({
+                return tool_response({
                     'success': True,
                     'releases': releases_data,
                     'count': len(releases_data)
-                }, ensure_ascii=False)
+                }, execution_id)
             except Exception as e:
                 raise(e)
-                return json5.dumps({
+                return tool_response({
                     'success': False,
                     'error': str(e)
-                }, ensure_ascii=False)
+                }, execution_id if 'execution_id' in locals() else None)
         
         return run_async(_async_call)
 
@@ -678,13 +715,15 @@ class HelmGetHistory(BaseTool):
             'type': 'string',
             'description': 'Release namespace (default: "default")',
             'required': False
-        }
+        },
+        EXECUTION_ID_PARAMETER,
     ]
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
                 args = parse_params(params)
+                execution_id = args.get('execution_id')
                 client = HelmClient()
                 
                 revisions = await client.get_history(
@@ -704,16 +743,16 @@ class HelmGetHistory(BaseTool):
                     for r in revisions
                 ]
                 
-                return json5.dumps({
+                return tool_response({
                     'success': True,
                     'revisions': revisions_data,
                     'count': len(revisions_data)
-                }, ensure_ascii=False)
+                }, execution_id)
             except Exception as e:
-                return json5.dumps({
+                return tool_response({
                     'success': False,
                     'error': str(e)
-                }, ensure_ascii=False)
+                }, execution_id if 'execution_id' in locals() else None)
         
         return run_async(_async_call)
 
@@ -735,13 +774,15 @@ class HelmGetValues(BaseTool):
             'type': 'string',
             'description': 'Release namespace (default: "default")',
             'required': False
-        }
+        },
+        EXECUTION_ID_PARAMETER,
     ]
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
                 args = parse_params(params)
+                execution_id = args.get('execution_id')
                 client = HelmClient()
                 
                 values = await client.get_values(
@@ -749,15 +790,15 @@ class HelmGetValues(BaseTool):
                     namespace=args.get('namespace', 'default')
                 )
                 
-                return json5.dumps({
+                return tool_response({
                     'success': True,
                     'values': values
-                }, ensure_ascii=False)
+                }, execution_id)
             except Exception as e:
-                return json5.dumps({
+                return tool_response({
                     'success': False,
                     'error': str(e)
-                }, ensure_ascii=False)
+                }, execution_id if 'execution_id' in locals() else None)
         
         return run_async(_async_call)
 
@@ -789,13 +830,15 @@ class HelmRollback(BaseTool):
             'type': 'string',
             'description': 'Release namespace (default: "default")',
             'required': False
-        }
+        },
+        EXECUTION_ID_PARAMETER,
     ]
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
                 args = parse_params(params)
+                execution_id = args.get('execution_id')
                 client = HelmClient()
                 
                 success = await client.rollback(
@@ -806,20 +849,20 @@ class HelmRollback(BaseTool):
                 )
                 
                 if success:
-                    return json5.dumps({
+                    return tool_response({
                         'success': True,
                         'message': f"Release '{args['release_name']}' rolled back to revision {args['revision']}"
-                    }, ensure_ascii=False)
+                    }, execution_id)
                 else:
-                    return json5.dumps({
+                    return tool_response({
                         'success': False,
                         'message': f"Failed to rollback release '{args['release_name']}'"
-                    }, ensure_ascii=False)
+                    }, execution_id)
             except Exception as e:
-                return json5.dumps({
+                return tool_response({
                     'success': False,
                     'error': str(e)
-                }, ensure_ascii=False)
+                }, execution_id if 'execution_id' in locals() else None)
         
         return run_async(_async_call)
 
@@ -841,13 +884,15 @@ class HelmUninstall(BaseTool):
             'type': 'string',
             'description': 'Release namespace (default: "default")',
             'required': False
-        }
+        },
+        EXECUTION_ID_PARAMETER,
     ]
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
             try:
                 args = parse_params(params)
+                execution_id = args.get('execution_id')
                 client = HelmClient()
                 
                 success = await client.uninstall(
@@ -857,19 +902,19 @@ class HelmUninstall(BaseTool):
                 )
                 
                 if success:
-                    return json5.dumps({
+                    return tool_response({
                         'success': True,
                         'message': f"Release '{args['release_name']}' uninstalled successfully"
-                    }, ensure_ascii=False)
+                    }, execution_id)
                 else:
-                    return json5.dumps({
+                    return tool_response({
                         'success': False,
                         'message': f"Failed to uninstall release '{args['release_name']}'"
-                    }, ensure_ascii=False)
+                    }, execution_id)
             except Exception as e:
-                return json5.dumps({
+                return tool_response({
                     'success': False,
                     'error': str(e)
-                }, ensure_ascii=False)
+                }, execution_id if 'execution_id' in locals() else None)
         
         return run_async(_async_call)

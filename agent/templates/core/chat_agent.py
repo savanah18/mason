@@ -16,6 +16,55 @@ from qwen_agent.utils.output_beautify import typewriter_print
 class ChatAgentBackend:
     """Manages agent sessions and chat state."""
 
+    def __init__(self, *args, **kwargs):
+        self.sessions: Dict[str, Dict] = {}
+        self.agent = None
+        self.mcp_tools_count = 0
+        # Execution cache: execution_id -> "IN_PROGRESS" | "SUCCESS" | "FAILED"
+        self.execution_cache: Dict[str, str] = {}
+        self._initialize_agent(
+            kwargs["llm_cfg_path"],
+            kwargs["prompt_cfg_path"],
+            kwargs["actuators"]
+        )
+
+    def _has_tool_calls_in_response(self, response_messages: List[Dict]) -> bool:
+        """Check if response contains actual tool calls."""
+        for msg in response_messages:
+            if msg.get("role") == "tool":
+                return True
+        return False
+
+    def _verify_and_sanitize_execution_ids(self, response_text: str, current_execution_id: str) -> str:
+        """
+        Verify that execution_ids referenced in response are in cache with SUCCESS status.
+        Remove or warn about unverified execution_ids.
+        """
+        import re
+        # Find all execution_ids in response
+        pattern = r'exec-[a-zA-Z0-9\-]{20,}'
+        matches = re.findall(pattern, response_text)
+        
+        if not matches:
+            return response_text
+        
+        unverified = []
+        for exec_id in set(matches):
+            # Check if execution_id exists in cache and has SUCCESS status
+            status = self.execution_cache.get(exec_id)
+            if status != "SUCCESS":
+                unverified.append(exec_id)
+        
+        if unverified:
+            # Filter out references to unverified execution_ids
+            filtered_response = response_text
+            for exec_id in unverified:
+                filtered_response = filtered_response.replace(exec_id, f"[UNVERIFIED-{exec_id[:8]}]")
+            print(f"⚠️  Unverified execution IDs: {unverified}")
+            return filtered_response
+        
+        return response_text
+
     @staticmethod
     def _apply_mcp_ping_compat_patch():
         """Allow MCP servers that do not implement ping (legacy stdio servers)."""
@@ -62,16 +111,6 @@ class ChatAgentBackend:
         qwen_mcp_manager.MCPClient.execute_function = _execute_function_without_ping
         qwen_mcp_manager.MCPClient._ping_compat_patched = True
         print("✓ Applied MCP ping compatibility patch")
-    
-    def __init__(self, *args, **kwargs):
-        self.sessions: Dict[str, Dict] = {}
-        self.agent = None
-        self.mcp_tools_count = 0
-        self._initialize_agent(
-            kwargs["llm_cfg_path"],
-            kwargs["prompt_cfg_path"],
-            kwargs["actuators"]
-        )
     
     def _initialize_agent(self, llm_cfg_path, prompt_cfg_path, actuators):
         """Initialize Qwen agent with MCP tools."""
@@ -177,16 +216,33 @@ class ChatAgentBackend:
         return self.sessions.get(session_id)
     
     def clear_session(self, session_id: str) -> bool:
-        """Clear a chat session."""
+        """Clear a chat session and cleanup execution cache for this session."""
         if session_id in self.sessions:
             self.sessions[session_id]["messages"] = []
             self.sessions[session_id]["last_updated"] = datetime.utcnow().isoformat()
+            # Clean up execution cache entries for this session (they're scoped by session_id in the key)
+            self.execution_cache = {
+                k: v for k, v in self.execution_cache.items()
+                if not k.startswith(session_id[:8])
+            }
             print(f"🗑 Cleared session: {session_id}")
+            return True
+        return False
+
+    def delete_session(self, session_id: str) -> bool:
+        """Delete a session and cleanup execution cache."""
+        if session_id in self.sessions:
+            del self.sessions[session_id]
+            self.execution_cache = {
+                k: v for k, v in self.execution_cache.items()
+                if not k.startswith(session_id[:8])
+            }
+            print(f"🗑 Deleted session: {session_id}")
             return True
         return False
     
     def send_message(self, session_id: str, user_message: str) -> tuple[str, int, int]:
-        """Send a message and get response. Returns (response_text, context_length, input_length)."""
+        """Send a message and get response with execution verification. Returns (response_text, context_length, input_length)."""
         if not self.agent:
             raise ValueError("Agent not initialized")
         
@@ -194,14 +250,29 @@ class ChatAgentBackend:
         if not session:
             raise ValueError(f"Session {session_id} not found")
         
+        # Generate execution ID for this turn and mark as IN_PROGRESS
+        execution_id = f"exec-{session_id[:8]}-{uuid.uuid4().hex[:8]}"
+        self.execution_cache[execution_id] = "IN_PROGRESS"
+        print(f"🔐 Generated execution_id: {execution_id}")
+        
+        exec_context = f"\nNote: Include this execution_id in tool calls: {execution_id}"
+        
         # Add user message to history
         messages = session["messages"]
         messages.append({"role": "user", "content": user_message})
         print(f"📝 After adding user message: {len(messages)} messages in history")
         
-        # Get agent response
-        combined_messages = messages.copy()
+        # Use only user turns as model input to avoid replay bias from prior assistant tool summaries.
+        combined_messages = [m for m in messages if m.get("role") == "user"]
         context_length = len(combined_messages)
+        
+        # Inject execution_id context into last message (for LLM only, not stored)
+        if combined_messages:
+            combined_messages = combined_messages.copy()
+            combined_messages[-1] = {
+                **combined_messages[-1],
+                "content": combined_messages[-1].get("content", "") + exec_context
+            }
         
         # Calculate actual input size (character count)
         input_length = sum(len(str(msg.get('content', ''))) for msg in combined_messages)
@@ -217,23 +288,90 @@ class ChatAgentBackend:
         except Exception as e:
             response_text = f"Error: {str(e)}"
             response_messages = [{"role": "assistant", "content": response_text}]
+            self.execution_cache[execution_id] = "FAILED"
+
+        # Check if tool response contains the execution_id (confirms successful execution)
+        tool_response_content = str(response_text) + str(response_messages)
+        if execution_id in tool_response_content:
+            self.execution_cache[execution_id] = "SUCCESS"
+            print(f"✅ Execution {execution_id} marked SUCCESS (execution_id found in response)")
+        else:
+            self.execution_cache[execution_id] = "FAILED"
+            print(f"❌ Execution {execution_id} marked FAILED (execution_id not echoed back)")
+
+        # Verify execution_ids before adding to history (sanitization point)
+        verified_response = self._verify_and_sanitize_execution_ids(response_text, execution_id)
+        if verified_response != response_text:
+            print(f"⚠️  Filtered unverified execution IDs from response")
+            response_text = verified_response
 
         # Add assistant/tool responses to history
         if response_messages:
             session["messages"].extend(response_messages)
         else:
-            session["messages"].append({"role": "assistant", "content": response_text})
+            session["messages"].append(
+                {
+                    "role": "assistant",
+                    "content": response_text,
+                }
+            )
         print(f"✅ After agent response: {len(session['messages'])} total messages in session")
         
         session["last_updated"] = datetime.utcnow().isoformat()
         
         return response_text, context_length, input_length
+
+    def _has_tool_calls_in_response(self, response_messages: List[Dict]) -> bool:
+        """Check if response contains actual tool calls."""
+        for msg in response_messages:
+            if msg.get("role") == "tool":
+                return True
+        return False
+
+    def _verify_and_sanitize_execution_ids(self, response_text: str, current_execution_id: str) -> str:
+        """
+        Verify that execution_ids referenced in response are in cache with SUCCESS status.
+        Remove or warn about unverified execution_ids.
+        """
+        import re
+        # Find all execution_ids in response
+        pattern = r'exec-[a-zA-Z0-9\-]{20,}'
+        matches = re.findall(pattern, response_text)
+        
+        if not matches:
+            return response_text
+        
+        unverified = []
+        for exec_id in set(matches):
+            # Check if execution_id exists in cache and has SUCCESS status
+            status = self.execution_cache.get(exec_id)
+            if status != "SUCCESS":
+                unverified.append(exec_id)
+        
+        if unverified:
+            # Filter out references to unverified execution_ids
+            filtered_response = response_text
+            for exec_id in unverified:
+                filtered_response = filtered_response.replace(exec_id, f"[UNVERIFIED-{exec_id[:8]}]")
+            print(f"⚠️  Unverified execution IDs: {unverified}")
+            return filtered_response
+        
+        return response_text
+        
+        return response_text, context_length, input_length
     
     def get_health_status(self) -> Dict:
         """Get backend health status."""
+        cache_stats = {
+            "total": len(self.execution_cache),
+            "in_progress": sum(1 for v in self.execution_cache.values() if v == "IN_PROGRESS"),
+            "success": sum(1 for v in self.execution_cache.values() if v == "SUCCESS"),
+            "failed": sum(1 for v in self.execution_cache.values() if v == "FAILED"),
+        }
         return {
             "status": "healthy",
             "mcp_tools_loaded": self.mcp_tools_count,
             "sessions_active": len(self.sessions),
+            "execution_cache": cache_stats,
             "backend_version": "1.0.0",
         }

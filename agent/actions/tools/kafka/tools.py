@@ -38,7 +38,7 @@ class KafkaProduceMessage(BaseTool):
     """Publish a message to Kafka topic."""
 
     description = (
-        "Publish a message to a Kafka topic. Supports optional key and headers."
+        "Publish a message to a Kafka topic. Supports optional key, headers, and execution_id."
     )
 
     parameters = [
@@ -67,6 +67,12 @@ class KafkaProduceMessage(BaseTool):
             "required": False,
         },
         {
+            "name": "execution_id",
+            "type": "string",
+            "description": "Optional execution ID (provided in system context)",
+            "required": False,
+        },
+        {
             "name": "wait_timeout_sec",
             "type": "number",
             "description": "Delivery wait timeout in seconds (default: 10)",
@@ -81,6 +87,7 @@ class KafkaProduceMessage(BaseTool):
             message = args["message"]
             key = args.get("key")
             headers = args.get("headers")
+            execution_id = args.get("execution_id")
             wait_timeout_sec = float(args.get("wait_timeout_sec", 10))
 
             client = KafkaProducerClient.get_shared_client(
@@ -95,19 +102,25 @@ class KafkaProduceMessage(BaseTool):
                 wait_timeout_sec=wait_timeout_sec,
             )
 
-            return json5.dumps(
-                {
-                    "success": True,
-                    "message": "Kafka message published",
-                    "metadata": metadata,
-                },
-                ensure_ascii=False,
-            )
+            result = {
+                "success": True,
+                "message": "Kafka message published",
+                "metadata": metadata,
+            }
+            
+            # Echo back execution_id if provided
+            if execution_id:
+                result["execution_id"] = execution_id
+
+            return json5.dumps(result, ensure_ascii=False)
         except Exception as e:
-            return json5.dumps(
-                {
-                    "success": False,
-                    "error": str(e),
-                },
-                ensure_ascii=False,
-            )
+            result = {
+                "success": False,
+                "error": str(e),
+            }
+            
+            # Echo back execution_id even on error
+            if args.get("execution_id"):
+                result["execution_id"] = args.get("execution_id")
+            
+            return json5.dumps(result, ensure_ascii=False)
