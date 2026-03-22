@@ -12,8 +12,15 @@ RUN curl -fsSL https://get.helm.sh/helm-v4.0.0-linux-amd64.tar.gz -o helm.tar.gz
     && tar -zxvf helm.tar.gz \
     && mv linux-amd64/helm /usr/local/bin/helm \
     && rm -rf linux-amd64 helm.tar.gz
+
+# Install kubectl (latest stable release)
+RUN KUBECTL_VERSION="$(curl -L -s https://dl.k8s.io/release/stable.txt)" \
+    && curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o /usr/local/bin/kubectl \
+    && chmod +x /usr/local/bin/kubectl
+
 # Verify installation
 RUN helm version
+RUN kubectl version --client
 
 
 

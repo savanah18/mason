@@ -2,7 +2,7 @@
   "name": "ai-chat-assistant",
   "displayName": "AI Chat Assistant",
   "description": "OpenAPI-compatible AI chat assistant with support for various inference backends including TensorRT-LLM, vLLM, OpenAI, and more.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "publisher": "your-publisher",
   "engines": {
     "vscode": "^1.87.0"

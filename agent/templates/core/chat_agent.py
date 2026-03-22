@@ -1,4 +1,5 @@
 import os
+import re
 import threading
 import uuid
 from datetime import datetime
@@ -20,8 +21,12 @@ class ChatAgentBackend:
         self.sessions: Dict[str, Dict] = {}
         self.agent = None
         self.mcp_tools_count = 0
+        self.prune_intermediate_task_contexts = kwargs.get("prune_intermediate_task_contexts", False)
+        self.compact_chunk_max_chars = int(os.getenv("COMPACT_CHUNK_MAX_CHARS", "1800"))
         # Execution cache: execution_id -> "IN_PROGRESS" | "SUCCESS" | "FAILED"
         self.execution_cache: Dict[str, str] = {}
+        if self.prune_intermediate_task_contexts:
+            print("[W] Prune Intermediate task contexts enabled...")
         self._initialize_agent(
             kwargs["llm_cfg_path"],
             kwargs["prompt_cfg_path"],
@@ -35,12 +40,44 @@ class ChatAgentBackend:
                 return True
         return False
 
+    def _has_runtime_tool_evidence(self, response_messages: List[Dict]) -> bool:
+        """Detect tool activity across common streamed message formats."""
+        for msg in response_messages:
+            if not isinstance(msg, dict):
+                continue
+
+            role = msg.get("role")
+            if role in ("tool", "function"):
+                return True
+
+            if "tool_calls" in msg or "function_call" in msg:
+                return True
+
+            content = msg.get("content")
+            if isinstance(content, list):
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+                    if part.get("type") in (
+                        "tool_call",
+                        "tool_result",
+                        "function_call",
+                        "function_result",
+                    ):
+                        return True
+        return False
+
+    def _response_text_indicates_tool_flow(self, response_text: str) -> bool:
+        """Detect tool-flow markers in streamed text output."""
+        if not response_text:
+            return False
+        return "[TOOL_CALL]" in response_text and "[TOOL_RESPONSE]" in response_text
+
     def _verify_and_sanitize_execution_ids(self, response_text: str, current_execution_id: str) -> str:
         """
         Verify that execution_ids referenced in response are in cache with SUCCESS status.
         Remove or warn about unverified execution_ids.
         """
-        import re
         # Find all execution_ids in response
         pattern = r'exec-[a-zA-Z0-9\-]{20,}'
         matches = re.findall(pattern, response_text)
@@ -64,6 +101,59 @@ class ChatAgentBackend:
             return filtered_response
         
         return response_text
+
+    def _tool_messages_contain_execution_id(self, response_messages: List[Dict], execution_id: str) -> bool:
+        """Return True when execution_id appears in streamed structured payload."""
+        if not execution_id:
+            return False
+
+        for msg in response_messages:
+            if execution_id in str(msg):
+                return True
+        return False
+
+    def _sanitize_faux_tool_transcript(
+        self,
+        response_text: str,
+        response_messages: List[Dict],
+        has_verified_tool_evidence: bool = False,
+    ) -> str:
+        """
+        Remove model-fabricated [TOOL_CALL]/[TOOL_RESPONSE] blocks when no real
+        tool-role messages were emitted by the agent runtime.
+        """
+        if has_verified_tool_evidence or self._has_runtime_tool_evidence(response_messages):
+            return response_text
+
+        if "[TOOL_CALL]" not in response_text and "[TOOL_RESPONSE]" not in response_text:
+            return response_text
+
+        sanitized = re.sub(
+            r"\[TOOL_CALL\][\s\S]*?(?=(\n\[TOOL_CALL\]|\n\[TOOL_RESPONSE\]|$))",
+            "",
+            response_text,
+        )
+        sanitized = re.sub(
+            r"\[TOOL_RESPONSE\][\s\S]*?(?=(\n\[TOOL_CALL\]|\n\[TOOL_RESPONSE\]|$))",
+            "",
+            sanitized,
+        )
+        sanitized = re.sub(r"\n{3,}", "\n\n", sanitized).strip()
+
+        warning = "\n\n[Warning] Tool transcript omitted because no verified tool event was emitted."
+        return (sanitized + warning).strip() if sanitized else warning.strip()
+
+    def _compact_assistant_chunk_text(self, text: str) -> str:
+        """Compact streaming assistant text to a bounded size for context retention."""
+        if not isinstance(text, str):
+            text = str(text)
+        text = text.strip()
+        if len(text) <= self.compact_chunk_max_chars:
+            return text
+
+        # Keep suffix because latest reasoning/tool outcomes are most useful for next turn.
+        tail = text[-self.compact_chunk_max_chars :]
+        return "[Compacted]\n" + tail
 
     @staticmethod
     def _apply_mcp_ping_compat_patch():
@@ -169,8 +259,9 @@ class ChatAgentBackend:
         print(f"✓ Qwen Agent initialized with the following mcp config.\n {mcp_cfg}")
         return mcp_cfg
 
-    def _load_mcp_tools(self, mcp_config, timeout=60) -> List:
+    def _load_mcp_tools(self, mcp_config, timeout=None) -> List:
         """Load MCP tools with timeout."""
+        timeout = timeout or int(os.getenv("MCP_INIT_TIMEOUT_SECONDS", "180"))
         result = {"tools": [], "error": None}
         mcp_config  = {
             "mcpServers" : mcp_config["mcp-servers"]
@@ -260,44 +351,79 @@ class ChatAgentBackend:
         # Add user message to history
         messages = session["messages"]
         messages.append({"role": "user", "content": user_message})
+        user_index_flag = len(messages) - 1
         print(f"📝 After adding user message: {len(messages)} messages in history")
         
-        # Use only user turns as model input to avoid replay bias from prior assistant tool summaries.
-        combined_messages = [m for m in messages if m.get("role") == "user"]
+        # Keep concise conversational memory for planning continuity.
+        # When pruning is enabled we retain only user + assistant summaries,
+        # while omitting raw tool messages to reduce token churn.
+        if self.prune_intermediate_task_contexts:
+            combined_messages = [
+                m for m in messages
+                if m.get("role") in ("user", "assistant")
+            ]
+        else:
+            combined_messages = messages.copy()
         context_length = len(combined_messages)
         
-        # Inject execution_id context into last message (for LLM only, not stored)
+        # Inject execution_id context into the latest user message only (for LLM only, not stored)
         if combined_messages:
             combined_messages = combined_messages.copy()
-            combined_messages[-1] = {
-                **combined_messages[-1],
-                "content": combined_messages[-1].get("content", "") + exec_context
-            }
+            last_user_idx = None
+            for idx in range(len(combined_messages) - 1, -1, -1):
+                if combined_messages[idx].get("role") == "user":
+                    last_user_idx = idx
+                    break
+
+            if last_user_idx is not None:
+                combined_messages[last_user_idx] = {
+                    **combined_messages[last_user_idx],
+                    "content": combined_messages[last_user_idx].get("content", "") + exec_context
+                }
         
         # Calculate actual input size (character count)
         input_length = sum(len(str(msg.get('content', ''))) for msg in combined_messages)
         print(f"📊 Context: {context_length} messages, {input_length} chars sent to LLM")
         
         response_text = ""
+        compact_response_text = ""
         response_messages: List[Dict] = []
         try:
             for response in self.agent.run(messages=combined_messages):
                 response_text = typewriter_print(response, response_text)
+                if self.prune_intermediate_task_contexts:
+                    compact_response_text = self._compact_assistant_chunk_text(response_text)
                 if isinstance(response, dict):
                     response_messages.append(response)
         except Exception as e:
             response_text = f"Error: {str(e)}"
+            compact_response_text = self._compact_assistant_chunk_text(response_text)
             response_messages = [{"role": "assistant", "content": response_text}]
             self.execution_cache[execution_id] = "FAILED"
 
-        # Check if tool response contains the execution_id (confirms successful execution)
-        tool_response_content = str(response_text) + str(response_messages)
-        if execution_id in tool_response_content:
+        # Determine whether this turn has verified tool-flow evidence.
+        runtime_tool_evidence = self._has_runtime_tool_evidence(response_messages)
+        text_tool_evidence = self._response_text_indicates_tool_flow(response_text)
+        has_verified_tool_evidence = runtime_tool_evidence or text_tool_evidence
+
+        # Sanitize model-fabricated tool transcript tags only when no verified evidence exists.
+        response_text = self._sanitize_faux_tool_transcript(
+            response_text,
+            response_messages,
+            has_verified_tool_evidence=has_verified_tool_evidence,
+        )
+
+        # Mark SUCCESS when verified tool flow exists and this turn's execution_id appears.
+        execution_id_present = (
+            execution_id in response_text
+            or self._tool_messages_contain_execution_id(response_messages, execution_id)
+        )
+        if has_verified_tool_evidence and execution_id_present:
             self.execution_cache[execution_id] = "SUCCESS"
-            print(f"✅ Execution {execution_id} marked SUCCESS (execution_id found in response)")
+            print(f"✅ Execution {execution_id} marked SUCCESS (verified tool event)")
         else:
             self.execution_cache[execution_id] = "FAILED"
-            print(f"❌ Execution {execution_id} marked FAILED (execution_id not echoed back)")
+            print(f"❌ Execution {execution_id} marked FAILED (no verified tool event)")
 
         # Verify execution_ids before adding to history (sanitization point)
         verified_response = self._verify_and_sanitize_execution_ids(response_text, execution_id)
@@ -315,48 +441,30 @@ class ChatAgentBackend:
                     "content": response_text,
                 }
             )
+
+        # Memory pruning: keep full history up to current user turn + final assistant summary.
+        if self.prune_intermediate_task_contexts:
+            print("Pruning intermediate memory. Keeping only user turn and final response...")
+            assistant_summary = None
+            if response_messages:
+                for msg in reversed(response_messages):
+                    if msg.get("role") == "assistant":
+                        assistant_summary = {
+                            "role": "assistant",
+                            "content": msg.get("content", response_text),
+                        }
+                        break
+            if assistant_summary is None:
+                assistant_summary = {
+                    "role": "assistant",
+                    "content": compact_response_text if compact_response_text else response_text,
+                }
+
+            session["messages"] = session["messages"][: user_index_flag + 1] + [assistant_summary]
+
         print(f"✅ After agent response: {len(session['messages'])} total messages in session")
         
         session["last_updated"] = datetime.utcnow().isoformat()
-        
-        return response_text, context_length, input_length
-
-    def _has_tool_calls_in_response(self, response_messages: List[Dict]) -> bool:
-        """Check if response contains actual tool calls."""
-        for msg in response_messages:
-            if msg.get("role") == "tool":
-                return True
-        return False
-
-    def _verify_and_sanitize_execution_ids(self, response_text: str, current_execution_id: str) -> str:
-        """
-        Verify that execution_ids referenced in response are in cache with SUCCESS status.
-        Remove or warn about unverified execution_ids.
-        """
-        import re
-        # Find all execution_ids in response
-        pattern = r'exec-[a-zA-Z0-9\-]{20,}'
-        matches = re.findall(pattern, response_text)
-        
-        if not matches:
-            return response_text
-        
-        unverified = []
-        for exec_id in set(matches):
-            # Check if execution_id exists in cache and has SUCCESS status
-            status = self.execution_cache.get(exec_id)
-            if status != "SUCCESS":
-                unverified.append(exec_id)
-        
-        if unverified:
-            # Filter out references to unverified execution_ids
-            filtered_response = response_text
-            for exec_id in unverified:
-                filtered_response = filtered_response.replace(exec_id, f"[UNVERIFIED-{exec_id[:8]}]")
-            print(f"⚠️  Unverified execution IDs: {unverified}")
-            return filtered_response
-        
-        return response_text
         
         return response_text, context_length, input_length
     

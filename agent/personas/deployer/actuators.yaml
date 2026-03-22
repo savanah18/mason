@@ -25,5 +25,6 @@ spec:
   - "helm-get-values"
   - "helm-rollback"
   - "helm-uninstall"
+  - "helm-test"
   exclude-tools:
   - "kubernetes-configuration_view"

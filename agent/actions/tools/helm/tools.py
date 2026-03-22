@@ -25,18 +25,14 @@ def run_async(async_func: Callable) -> Any:
     Handles cases where event loop is already running.
     """
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # Event loop already running, use thread executor
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = loop.run_in_executor(pool, asyncio.run, async_func())
-                return future.result()
-        else:
-            # No running loop, use asyncio.run directly
-            return asyncio.run(async_func())
+        asyncio.get_running_loop()
+        # Event loop already running in this thread; execute coroutine in a
+        # separate worker thread and wait for completion synchronously.
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(lambda: asyncio.run(async_func())).result()
     except RuntimeError:
-        # No event loop in this thread, create one
+        # No running event loop in this thread, run directly.
         return asyncio.run(async_func())
 
 
@@ -64,6 +60,47 @@ def parse_params(params) -> dict:
     except Exception:
         # If parsing fails, return empty dict
         return {}
+
+
+def parse_bool(value: Any, default: bool = False) -> bool:
+    """Parse a bool from native booleans or common string values."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "y", "on"}
+    return bool(value)
+
+
+def parse_duration_seconds(value: Optional[str], default: int = 300) -> int:
+    """Parse duration strings like 5m, 120s, 2h into seconds."""
+    if not value:
+        return default
+    if isinstance(value, (int, float)):
+        return int(value)
+
+    text = str(value).strip().lower()
+    if not text:
+        return default
+
+    # Support plain integer seconds
+    if text.isdigit():
+        return int(text)
+
+    try:
+        unit = text[-1]
+        amount = float(text[:-1])
+        if unit == "s":
+            return int(amount)
+        if unit == "m":
+            return int(amount * 60)
+        if unit == "h":
+            return int(amount * 3600)
+    except Exception:
+        return default
+
+    return default
 
 
 def tool_response(payload: dict, execution_id: Optional[str] = None) -> str:
@@ -917,4 +954,85 @@ class HelmUninstall(BaseTool):
                     'error': str(e)
                 }, execution_id if 'execution_id' in locals() else None)
         
+        return run_async(_async_call)
+
+
+@register_tool('helm-test')
+class HelmTest(BaseTool):
+    """Run Helm test hooks for a release."""
+
+    description = 'Run Helm tests for a deployed release and optionally include test logs.'
+    parameters = [
+        {
+            'name': 'release_name',
+            'type': 'string',
+            'description': 'Name of the release to test',
+            'required': True
+        },
+        {
+            'name': 'namespace',
+            'type': 'string',
+            'description': 'Release namespace (default: "default")',
+            'required': False
+        },
+        {
+            'name': 'logs',
+            'type': 'string',
+            'description': 'Include test pod logs in output (true/false, default: true)',
+            'required': False
+        },
+        {
+            'name': 'filter',
+            'type': 'string',
+            'description': 'Optional regex filter for selecting specific test hooks',
+            'required': False
+        },
+        {
+            'name': 'timeout',
+            'type': 'string',
+            'description': 'Optional test timeout (e.g., "5m", "120s")',
+            'required': False
+        },
+        EXECUTION_ID_PARAMETER,
+    ]
+
+    def call(self, params: str, **kwargs) -> str:
+        async def _async_call():
+            try:
+                args = parse_params(params)
+                execution_id = args.get('execution_id')
+                helm_timeout_arg = args.get('timeout')
+                # Keep process timeout slightly above Helm's own timeout to allow
+                # command teardown and stdout collection.
+                client_timeout = parse_duration_seconds(helm_timeout_arg, default=300) + 30
+                client = HelmClient(timeout=client_timeout)
+
+                include_logs = parse_bool(args.get('logs'), default=True)
+                result = await client.test(
+                    release_name=args['release_name'],
+                    namespace=args.get('namespace', 'default'),
+                    logs=include_logs,
+                    filter_pattern=args.get('filter'),
+                    timeout=args.get('timeout')
+                )
+
+                if result.get('success'):
+                    return tool_response({
+                        'success': True,
+                        'message': f"Helm tests passed for release '{args['release_name']}'",
+                        'output': result.get('raw_output', '')
+                    }, execution_id)
+
+                return tool_response({
+                    'success': False,
+                    'message': f"Helm tests failed for release '{args['release_name']}'",
+                    'error': result.get('error', ''),
+                    'output': result.get('raw_output', '')
+                }, execution_id)
+            except Exception as e:
+                return tool_response({
+                    'success': False,
+                    'error': str(e)
+                }, execution_id if 'execution_id' in locals() else None)
+
         return run_async(_async_call)

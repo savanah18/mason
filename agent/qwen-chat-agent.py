@@ -21,6 +21,30 @@ from templates.core.chat_agent import ChatAgentBackend
 from actions.tools.kafka.tools import (
     KafkaProduceMessage
 )
+from actions.tools.resource_collector.tools import (
+    ResourceCollector
+)
+from actions.tools.kubernetes.tools import (
+    KubernetesListWorkloads,
+    KubernetesApplyResourceUpdate,
+)
+from actions.tools.helm.tools import (
+    HelmAddRepository,
+    HelmRegistryLogin,
+    HelmUpdateRepositories,
+    HelmListRepositories,
+    HelmRemoveRepository,
+    HelmTemplate,
+    HelmLint,
+    HelmInstall,
+    HelmUpgrade,
+    HelmListReleases,
+    HelmGetHistory,
+    HelmGetValues,
+    HelmRollback,
+    HelmUninstall,
+    HelmTest,
+)
 
 # ============================================================================
 # FastAPI App
@@ -38,7 +62,8 @@ async def lifespan(app: FastAPI):
     backend = ChatAgentBackend(
         llm_cfg_path = "./templates/llm/qwen.yaml",
         prompt_cfg_path = "./personas/chat/prompts.yaml",
-        actuators = "./personas/chat/actuators.yaml"
+        actuators = "./personas/chat/actuators.yaml",
+        prune_intermediate_task_contexts = True
     )
     yield
     print("🛑 Backend service shutting down...")

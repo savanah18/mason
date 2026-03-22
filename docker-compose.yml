@@ -26,6 +26,9 @@ x-gpu-resources: &gpu-resources
             count: 1
             capabilities: [gpu]
 
+x-prometheus-env: &prometheus-env
+  PROMETHEUS_URL: ${PROMETHEUS_URL}
+
 secrets:
   oci-registry:
     file: ./.secrets/oci-registry
@@ -187,10 +190,12 @@ services:
       OCI_REGISTRY_SECRET: /run/secrets/oci-registry
       KAFKA_BOOTSTRAP_SERVERS: kafka-server:9092
       KUBECONFIG: /run/secrets/kubernetes-config
+      <<: *prometheus-env
     volumes:
     - ./agent/personas:/app/personas:rw
     - ./agent/qwen-chat-agent.py:/app/qwen-chat-agent.py:rw # for dev purposes only
     - ./agent/templates:/app/templates:rw
+    - ./agent/actions/:/app/actions:rw
     command: >
       python -u qwen-chat-agent.py 
     ports:

@@ -18,5 +18,24 @@ spec:
         CHAOS_CENTER_ENDPOINT: "http://172.25.152.192:32630"
         LITMUS_PROJECT_ID: "dadfe41f-505e-4023-bcbf-8e3b6033374c"
         LITMUS_ACCESS_TOKEN: "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJleHAiOjQ5MjcxMzYyMTQsInJvbGUiOiJhZG1pbiIsInVpZCI6IjEzMDk0NTg0LTE3M2YtNDRhMy1hNDFjLTcyN2NkMWFiYzBmNCIsInVzZXJuYW1lIjoiYWRtaW4ifQ.crBvQ6Pv2ss6QTsnZ-Sih_QfMqlLq6eu10k4X2PhYyi_HdXwDge6mhhAEK-amtbMRGHLq3IEmUqfhULNZw-RGQ"
+    # victoriametrics:
+    #   command: "/app/actions/mcp/servers/victoria-metrics/mcp-victoriametrics"
+    #   args: []
+    #   env:
+    #     VM_INSTANCE_ENTRYPOINT: "http://172.25.152.192:32385"
+    #     VM_INSTANCE_TYPE: "cluster"
+    mcp-time:
+      type: "stdio"
+      args: []
+      command: "/app/actions/mcp/servers/time/mcp-time"
   builtin-functions:
+  - "helm-template"
+  - "helm-list-releases"
+  - "helm-get-values"
+  - "helm-upgrade"
+  - "helm-rollback"
+  - "helm-test"
   - "kafka-produce-message"
+  - "resource-collector"
+  - "kubernetes-list-workloads"
+  - "kubernetes-apply-resource-update"

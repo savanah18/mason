@@ -5,13 +5,16 @@ import * as path from 'path';
 type ChatMessage = { id: number; sender: 'user' | 'assistant'; text: string };
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8002';
-const CHAT_VERSION = '0.4.1';
+const CHAT_VERSION = '0.4.2';
 const CHAT_ENDPOINT = `${BACKEND_URL}/chat/send`;
 const HEALTH_ENDPOINT = `${BACKEND_URL}/health`;
 const CREATE_SESSION_ENDPOINT = `${BACKEND_URL}/session/create`;
 const CLEAR_CHAT_ENDPOINT = `${BACKEND_URL}/chat/clear`;
 const MAX_MESSAGES_IN_UI = 100;
-const REQUEST_TIMEOUT_MS = 180000;
+const REQUEST_TIMEOUT_MS = (() => {
+  const parsed = Number(process.env.AI_CHAT_REQUEST_TIMEOUT_MS ?? '3600000');
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 3600000;
+})();
 const HEALTH_CHECK_TIMEOUT_MS = 5000;
 
 export function activate(context: vscode.ExtensionContext): void {

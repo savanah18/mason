@@ -529,6 +529,44 @@ class HelmClient:
         result = await self._run_helm(args, check_error=False)
         return result["success"]
 
+    async def test(
+        self,
+        release_name: str,
+        namespace: str = "default",
+        logs: bool = True,
+        filter_pattern: Optional[str] = None,
+        timeout: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Run Helm tests for a release.
+
+        Args:
+            release_name: Release name
+            namespace: Release namespace
+            logs: Include test pod logs in output
+            filter_pattern: Optional regex filter for test hooks
+            timeout: Optional timeout (e.g., "5m", "120s")
+
+        Returns:
+            Dict with success status and command output
+        """
+        args = ["test", release_name, "-n", namespace]
+
+        if logs:
+            args.append("--logs")
+
+        if filter_pattern:
+            args.extend(["--filter", filter_pattern])
+
+        if timeout:
+            args.extend(["--timeout", timeout])
+
+        result = await self._run_helm(args, check_error=False)
+        return {
+            "success": result["success"],
+            "error": result["error"],
+            "raw_output": result["raw_output"]
+        }
+
     async def get_values(
         self,
         release_name: str,
