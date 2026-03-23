@@ -8,6 +8,15 @@ from kafka import KafkaConsumer
 
 from ..config.kafka import KafkaEventListenerConfig
 
+def safe_deserializer(m):
+    if not m:
+        return None
+    try:
+        return json.loads(m.decode("utf-8"))
+    except json.JSONDecodeError:
+        print("Skipping invalid JSON:", m)
+        return None
+
 class Sensor(ABC):
     @abstractmethod
     def acquire_percepts(self)->Any: 
@@ -24,11 +33,10 @@ class KafkaEventListener(Sensor):
         self.configure(config)
 
     def configure(self, config: Dict):
-        print(config)
         topics = config.get("topics")
         config.pop('topics')
         # Add JSON deserializer for message values
-        config['value_deserializer'] = lambda m: json.loads(m.decode('utf-8')) if m else None
+        config['value_deserializer'] = safe_deserializer
         self.consumer = KafkaConsumer(**config)
         # regex based subscription
         pattern = "(" + "|".join(topics) + ")"
@@ -40,8 +48,8 @@ class KafkaEventListener(Sensor):
             raw_event = message.value
             
             # Handle None or invalid messages
-            if raw_event is None:
-                print("Skipping None message")
+            if not raw_event:
+                print("Skipping empty message")
                 continue
                 
             percept = {

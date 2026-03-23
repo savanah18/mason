@@ -1,5 +1,4 @@
 import os
-import re
 import threading
 import uuid
 from datetime import datetime
@@ -10,9 +9,23 @@ import yaml
 from fastapi import FastAPI
 
 from qwen_agent.agents import Assistant
-from qwen_agent.tools import mcp_manager as qwen_mcp_manager
 from qwen_agent.tools.mcp_manager import MCPManager
 from qwen_agent.utils.output_beautify import typewriter_print
+from templates.core.context_compaction import (
+    compact_assistant_chunk_text,
+    inject_execution_id_context,
+    prune_session_history,
+    select_context_messages,
+)
+from transformers import AutoTokenizer
+
+from templates.core.mcp_compat import apply_mcp_ping_compat_patch
+from templates.core.response_guardrails import (
+    has_runtime_tool_evidence,
+    sanitize_faux_tool_transcript,
+    tool_messages_contain_execution_id,
+    verify_and_sanitize_execution_ids,
+)
 
 class ChatAgentBackend:
     """Manages agent sessions and chat state."""
@@ -32,175 +45,12 @@ class ChatAgentBackend:
             kwargs["prompt_cfg_path"],
             kwargs["actuators"]
         )
-
-    def _has_tool_calls_in_response(self, response_messages: List[Dict]) -> bool:
-        """Check if response contains actual tool calls."""
-        for msg in response_messages:
-            if msg.get("role") == "tool":
-                return True
-        return False
-
-    def _has_runtime_tool_evidence(self, response_messages: List[Dict]) -> bool:
-        """Detect tool activity across common streamed message formats."""
-        for msg in response_messages:
-            if not isinstance(msg, dict):
-                continue
-
-            role = msg.get("role")
-            if role in ("tool", "function"):
-                return True
-
-            if "tool_calls" in msg or "function_call" in msg:
-                return True
-
-            content = msg.get("content")
-            if isinstance(content, list):
-                for part in content:
-                    if not isinstance(part, dict):
-                        continue
-                    if part.get("type") in (
-                        "tool_call",
-                        "tool_result",
-                        "function_call",
-                        "function_result",
-                    ):
-                        return True
-        return False
-
-    def _response_text_indicates_tool_flow(self, response_text: str) -> bool:
-        """Detect tool-flow markers in streamed text output."""
-        if not response_text:
-            return False
-        return "[TOOL_CALL]" in response_text and "[TOOL_RESPONSE]" in response_text
-
-    def _verify_and_sanitize_execution_ids(self, response_text: str, current_execution_id: str) -> str:
-        """
-        Verify that execution_ids referenced in response are in cache with SUCCESS status.
-        Remove or warn about unverified execution_ids.
-        """
-        # Find all execution_ids in response
-        pattern = r'exec-[a-zA-Z0-9\-]{20,}'
-        matches = re.findall(pattern, response_text)
-        
-        if not matches:
-            return response_text
-        
-        unverified = []
-        for exec_id in set(matches):
-            # Check if execution_id exists in cache and has SUCCESS status
-            status = self.execution_cache.get(exec_id)
-            if status != "SUCCESS":
-                unverified.append(exec_id)
-        
-        if unverified:
-            # Filter out references to unverified execution_ids
-            filtered_response = response_text
-            for exec_id in unverified:
-                filtered_response = filtered_response.replace(exec_id, f"[UNVERIFIED-{exec_id[:8]}]")
-            print(f"⚠️  Unverified execution IDs: {unverified}")
-            return filtered_response
-        
-        return response_text
-
-    def _tool_messages_contain_execution_id(self, response_messages: List[Dict], execution_id: str) -> bool:
-        """Return True when execution_id appears in streamed structured payload."""
-        if not execution_id:
-            return False
-
-        for msg in response_messages:
-            if execution_id in str(msg):
-                return True
-        return False
-
-    def _sanitize_faux_tool_transcript(
-        self,
-        response_text: str,
-        response_messages: List[Dict],
-        has_verified_tool_evidence: bool = False,
-    ) -> str:
-        """
-        Remove model-fabricated [TOOL_CALL]/[TOOL_RESPONSE] blocks when no real
-        tool-role messages were emitted by the agent runtime.
-        """
-        if has_verified_tool_evidence or self._has_runtime_tool_evidence(response_messages):
-            return response_text
-
-        if "[TOOL_CALL]" not in response_text and "[TOOL_RESPONSE]" not in response_text:
-            return response_text
-
-        sanitized = re.sub(
-            r"\[TOOL_CALL\][\s\S]*?(?=(\n\[TOOL_CALL\]|\n\[TOOL_RESPONSE\]|$))",
-            "",
-            response_text,
-        )
-        sanitized = re.sub(
-            r"\[TOOL_RESPONSE\][\s\S]*?(?=(\n\[TOOL_CALL\]|\n\[TOOL_RESPONSE\]|$))",
-            "",
-            sanitized,
-        )
-        sanitized = re.sub(r"\n{3,}", "\n\n", sanitized).strip()
-
-        warning = "\n\n[Warning] Tool transcript omitted because no verified tool event was emitted."
-        return (sanitized + warning).strip() if sanitized else warning.strip()
-
-    def _compact_assistant_chunk_text(self, text: str) -> str:
-        """Compact streaming assistant text to a bounded size for context retention."""
-        if not isinstance(text, str):
-            text = str(text)
-        text = text.strip()
-        if len(text) <= self.compact_chunk_max_chars:
-            return text
-
-        # Keep suffix because latest reasoning/tool outcomes are most useful for next turn.
-        tail = text[-self.compact_chunk_max_chars :]
-        return "[Compacted]\n" + tail
+        self.tokenizer = AutoTokenizer.from_pretrained("/mnt/checkpoint")
 
     @staticmethod
     def _apply_mcp_ping_compat_patch():
         """Allow MCP servers that do not implement ping (legacy stdio servers)."""
-        if getattr(qwen_mcp_manager.MCPClient, "_ping_compat_patched", False):
-            return
-
-        async def _execute_function_without_ping(self, tool_name, tool_args: dict):
-            from mcp.types import TextResourceContents
-
-            if tool_name == 'list_resources':
-                try:
-                    list_resources = await self.session.list_resources()
-                    if list_resources.resources:
-                        return '\n\n'.join(str(resource) for resource in list_resources.resources)
-                    return 'No resources found'
-                except Exception as e:
-                    return f'Error: {e}'
-
-            if tool_name == 'read_resource':
-                try:
-                    uri = tool_args.get('uri')
-                    if not uri:
-                        raise ValueError('URI is required for read_resource')
-                    read_resource = await self.session.read_resource(uri)
-                    texts = []
-                    for resource in read_resource.contents:
-                        if isinstance(resource, TextResourceContents):
-                            texts.append(resource.text)
-                    if texts:
-                        return '\n\n'.join(texts)
-                    return 'Failed to read resource'
-                except Exception as e:
-                    return f'Error: {e}'
-
-            response = await self.session.call_tool(tool_name, tool_args)
-            texts = []
-            for content in response.content:
-                if content.type == 'text':
-                    texts.append(content.text)
-            if texts:
-                return '\n\n'.join(texts)
-            return 'execute error'
-
-        qwen_mcp_manager.MCPClient.execute_function = _execute_function_without_ping
-        qwen_mcp_manager.MCPClient._ping_compat_patched = True
-        print("✓ Applied MCP ping compatibility patch")
+        apply_mcp_ping_compat_patch()
     
     def _initialize_agent(self, llm_cfg_path, prompt_cfg_path, actuators):
         """Initialize Qwen agent with MCP tools."""
@@ -331,6 +181,11 @@ class ChatAgentBackend:
             print(f"🗑 Deleted session: {session_id}")
             return True
         return False
+
+    def compute_context_length(self, messages: List = []):
+        text = "".join([m["role"] + ": " + m["content"] for m in messages])
+        tokens = self.tokenizer.encode(text)
+        return len(tokens)
     
     def send_message(self, session_id: str, user_message: str) -> tuple[str, int, int]:
         """Send a message and get response with execution verification. Returns (response_text, context_length, input_length)."""
@@ -342,11 +197,11 @@ class ChatAgentBackend:
             raise ValueError(f"Session {session_id} not found")
         
         # Generate execution ID for this turn and mark as IN_PROGRESS
-        execution_id = f"exec-{session_id[:8]}-{uuid.uuid4().hex[:8]}"
-        self.execution_cache[execution_id] = "IN_PROGRESS"
-        print(f"🔐 Generated execution_id: {execution_id}")
+        # execution_id = f"exec-{session_id[:8]}-{uuid.uuid4().hex[:8]}"
+        # self.execution_cache[execution_id] = "IN_PROGRESS"
+        # print(f"🔐 Generated execution_id: {execution_id}")
         
-        exec_context = f"\nNote: Include this execution_id in tool calls: {execution_id}"
+        # exec_context = f"\nNote: Include this execution_id in tool calls: {execution_id}"
         
         # Add user message to history
         messages = session["messages"]
@@ -357,116 +212,86 @@ class ChatAgentBackend:
         # Keep concise conversational memory for planning continuity.
         # When pruning is enabled we retain only user + assistant summaries,
         # while omitting raw tool messages to reduce token churn.
-        if self.prune_intermediate_task_contexts:
-            combined_messages = [
-                m for m in messages
-                if m.get("role") in ("user", "assistant")
-            ]
-        else:
-            combined_messages = messages.copy()
-        context_length = len(combined_messages)
+        # combined_messages = select_context_messages(
+        #     messages,
+        #     self.prune_intermediate_task_contexts,
+        # )
+        # context_length = len(combined_messages)
         
-        # Inject execution_id context into the latest user message only (for LLM only, not stored)
-        if combined_messages:
-            combined_messages = combined_messages.copy()
-            last_user_idx = None
-            for idx in range(len(combined_messages) - 1, -1, -1):
-                if combined_messages[idx].get("role") == "user":
-                    last_user_idx = idx
-                    break
+        # # Inject execution_id context into the latest user message only (for LLM only, not stored)
+        # combined_messages = inject_execution_id_context(combined_messages, exec_context)
+        
+        # # Calculate actual input size (character count)
+        # input_length = sum(len(str(msg.get('content', ''))) for msg in combined_messages)
+        # print(f"📊 Context: {context_length} messages, {input_length} chars sent to LLM")
+        
 
-            if last_user_idx is not None:
-                combined_messages[last_user_idx] = {
-                    **combined_messages[last_user_idx],
-                    "content": combined_messages[last_user_idx].get("content", "") + exec_context
-                }
-        
-        # Calculate actual input size (character count)
-        input_length = sum(len(str(msg.get('content', ''))) for msg in combined_messages)
-        print(f"📊 Context: {context_length} messages, {input_length} chars sent to LLM")
-        
-        response_text = ""
-        compact_response_text = ""
-        response_messages: List[Dict] = []
+        tmp = ""
+        assistant_answer  = ""
+        structured_messages: List[Dict] = []
         try:
-            for response in self.agent.run(messages=combined_messages):
-                response_text = typewriter_print(response, response_text)
-                if self.prune_intermediate_task_contexts:
-                    compact_response_text = self._compact_assistant_chunk_text(response_text)
-                if isinstance(response, dict):
-                    response_messages.append(response)
-        except Exception as e:
-            response_text = f"Error: {str(e)}"
-            compact_response_text = self._compact_assistant_chunk_text(response_text)
-            response_messages = [{"role": "assistant", "content": response_text}]
-            self.execution_cache[execution_id] = "FAILED"
+            for response in self.agent.run(messages=session["messages"]):
+                tmp = typewriter_print(response, tmp) # for visual purposes 
 
-        # Determine whether this turn has verified tool-flow evidence.
-        runtime_tool_evidence = self._has_runtime_tool_evidence(response_messages)
-        text_tool_evidence = self._response_text_indicates_tool_flow(response_text)
-        has_verified_tool_evidence = runtime_tool_evidence or text_tool_evidence
+            assistant_answer = response[-1]['content']
+            structured_messages = response    
+            # print(f"final text message after every inference call {structured_messages}")
+            # print(f"final structured message after every inference call {structured_messages}")
+        except Exception as e:
+            assistant_answer = f"Error: {str(e)}"
+
+        # Determine if tools called have response.
+        runtime_tool_evidence = has_runtime_tool_evidence(structured_messages)
 
         # Sanitize model-fabricated tool transcript tags only when no verified evidence exists.
-        response_text = self._sanitize_faux_tool_transcript(
-            response_text,
-            response_messages,
-            has_verified_tool_evidence=has_verified_tool_evidence,
-        )
+        # response_text = sanitize_faux_tool_transcript(
+        #     response_text,
+        #     structured_messages,
+        #     runtime_tool_evidence=runtime_tool_evidence,
+        # )
 
-        # Mark SUCCESS when verified tool flow exists and this turn's execution_id appears.
-        execution_id_present = (
-            execution_id in response_text
-            or self._tool_messages_contain_execution_id(response_messages, execution_id)
-        )
-        if has_verified_tool_evidence and execution_id_present:
-            self.execution_cache[execution_id] = "SUCCESS"
-            print(f"✅ Execution {execution_id} marked SUCCESS (verified tool event)")
-        else:
-            self.execution_cache[execution_id] = "FAILED"
-            print(f"❌ Execution {execution_id} marked FAILED (no verified tool event)")
+        # Mark SUCCESS only when runtime evidence exists and execution_id appears
+        # in structured tool/runtime messages.
+        # execution_id_present = tool_messages_contain_execution_id(structured_messages, execution_id)
+        # if runtime_tool_evidence and execution_id_present:
+        #     self.execution_cache[execution_id] = "SUCCESS"
+        #     print(f"✅ Execution {execution_id} marked SUCCESS (verified tool event)")
+        # else:
+        #     self.execution_cache[execution_id] = "FAILED"
+        #     print(f"❌ Execution {execution_id} marked FAILED (no verified tool event)")
 
         # Verify execution_ids before adding to history (sanitization point)
-        verified_response = self._verify_and_sanitize_execution_ids(response_text, execution_id)
-        if verified_response != response_text:
-            print(f"⚠️  Filtered unverified execution IDs from response")
-            response_text = verified_response
+        # TODO REDIS Cache
+        # verified_response, unverified_ids = verify_and_sanitize_execution_ids(
+        #     response_text,
+        #     self.execution_cache,
+        # )
+        # if unverified_ids:
+        #     print(f"⚠️  Unverified execution IDs: {unverified_ids}")
+        # if verified_response != response_text:
+        #     print(f"⚠️  Filtered unverified execution IDs from response")
+        #     response_text = verified_response
 
         # Add assistant/tool responses to history
-        if response_messages:
-            session["messages"].extend(response_messages)
-        else:
-            session["messages"].append(
-                {
-                    "role": "assistant",
-                    "content": response_text,
-                }
-            )
+        if structured_messages:
+            session["messages"].extend(structured_messages[-1:])
 
         # Memory pruning: keep full history up to current user turn + final assistant summary.
-        if self.prune_intermediate_task_contexts:
-            print("Pruning intermediate memory. Keeping only user turn and final response...")
-            assistant_summary = None
-            if response_messages:
-                for msg in reversed(response_messages):
-                    if msg.get("role") == "assistant":
-                        assistant_summary = {
-                            "role": "assistant",
-                            "content": msg.get("content", response_text),
-                        }
-                        break
-            if assistant_summary is None:
-                assistant_summary = {
-                    "role": "assistant",
-                    "content": compact_response_text if compact_response_text else response_text,
-                }
-
-            session["messages"] = session["messages"][: user_index_flag + 1] + [assistant_summary]
+        # if self.prune_intermediate_task_contexts:
+        #     print("Pruning intermediate memory. Keeping only user turn and final response...")
+        #     session["messages"] = prune_session_history(
+        #         session_messages=session["messages"],
+        #         user_index_flag=user_index_flag,
+        #         structured_messages=structured_messages,
+        #         response_text=response_text,
+        #         compact_response_text=compact_response_text,
+        #     )
 
         print(f"✅ After agent response: {len(session['messages'])} total messages in session")
         
         session["last_updated"] = datetime.utcnow().isoformat()
         
-        return response_text, context_length, input_length
+        return assistant_answer, self.compute_context_length(session["messages"]), 0
     
     def get_health_status(self) -> Dict:
         """Get backend health status."""
