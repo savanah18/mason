@@ -120,7 +120,7 @@ class KafkaProduceMessage(BaseTool):
             }
             
             # Echo back execution_id even on error
-            if args.get("execution_id"):
-                result["execution_id"] = args.get("execution_id")
+            # if args.get("execution_id"):
+            #     result["execution_id"] = args.get("execution_id")
             
             return json5.dumps(result, ensure_ascii=False)

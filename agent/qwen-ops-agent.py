@@ -1,4 +1,5 @@
 import os
+import uuid
 from pathlib import Path
 from typing import Dict, Iterator, List, Literal, Optional, Union, Any
 import yaml
@@ -9,6 +10,19 @@ from templates.core.sensor import Sensor, KafkaEventListener
 from templates.mixins.json import FromJsonMixin
 from templates.config.goals import GoalConfig, Goal
 from templates.config.kafka import KafkaEventListenerConfig
+from templates.core.context_compaction import (
+    compact_assistant_chunk_text,
+    inject_execution_id_context,
+    prune_session_history,
+    select_context_messages,
+)
+from templates.core.mcp_compat import apply_mcp_ping_compat_patch
+from templates.core.response_guardrails import (
+    has_runtime_tool_evidence,
+    sanitize_faux_tool_transcript,
+    tool_messages_contain_execution_id,
+    verify_and_sanitize_execution_ids,
+)
 
 from qwen_agent.agents import Assistant
 from qwen_agent.tools.base import BaseTool, register_tool 
@@ -34,7 +48,18 @@ from actions.tools.helm.tools import (
     HelmRollback,
     HelmUninstall,
 )
-
+from actions.tools.kafka.tools import (
+    KafkaProduceMessage
+)
+from actions.tools.resource_collector.tools import (
+    ResourceCollector
+)
+from actions.tools.kubernetes.tools import (
+    KubernetesListWorkloads,
+    KubernetesGetNamespaceResourceQuota,
+    KubernetesGetNamespaceEvents,
+    KubernetesApplyResourceUpdate,
+)
 
 
 class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
@@ -72,6 +97,9 @@ class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
         if prune_intermediate_task_contexts:
             print(f"[W] Prune Intermediate task contexts enabled...")
         self.prune_intermediate_task_contexts = prune_intermediate_task_contexts
+        self.compact_chunk_max_chars = int(os.getenv("COMPACT_CHUNK_MAX_CHARS", "1800"))
+        # Execution cache: execution_id -> "IN_PROGRESS" | "SUCCESS" | "FAILED"
+        self.execution_cache: Dict[str, str] = {}
 
         # Initialize BaseAgent
         BaseAgent.__init__(
@@ -96,11 +124,21 @@ class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
             function_list= function_tools + mcp_tools,
             files=[]
         )
+        print("Initializing agent with the following system prompt")
+        print("*"*20)
+        print(system_message)
+        print(f"Agent has the following tools in its arsenal {mcp_tools + function_tools}")
+
+    @staticmethod
+    def _apply_mcp_ping_compat_patch():
+        """Allow MCP servers that do not implement ping (legacy stdio servers)."""
+        apply_mcp_ping_compat_patch()
 
     def configure_mcp_tools(self, mcpServers: dict ={}, exclude_tools: List[Any] = []):
         mcp_tools = []
         mcp_config = {"mcpServers": mcpServers}
         try:
+            self._apply_mcp_ping_compat_patch()
             mcp_tools = MCPManager().initConfig(mcp_config)
             mcp_tools = [t for t in mcp_tools if t.name not in exclude_tools]
             print(f"[I] Successfully loaded {len(mcp_tools)} MCP tools")
@@ -112,32 +150,128 @@ class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
 
 
     def reason(self, percepts=[]):
-        # TODO Goal Life Cycle Management
         print("Perfoming reasoning.... ")
+        # TODO Goal Life Cycle Management
+        # execution_id = f"exec-ops-{uuid.uuid4().hex[:8]}-{uuid.uuid4().hex[:8]}"
+        # self.execution_cache[execution_id] = "IN_PROGRESS"
+        # print(f"🔐 Generated execution_id: {execution_id}")
+        # exec_context = f"\nNote: Include this execution_id in tool calls: {execution_id}"
+
         prompt = {
             'role': 'user', 
-            'content': [
-                {
-                    'text': f"""
-                        {self.goal.base_prompt}
-                        {self.goal.playbook}
-                        {json.dumps([percept['data'] for percept in percepts])}.
-                    """
-                },
-            ]
+            'content': f"""
+                {self.goal.base_prompt} 
+                Use the following information.
+                {json.dumps([percept['data'] for percept in percepts])}.
+                
+            """
         }
         self.messages.append(prompt)
         user_index_flag = len(self.messages) - 1
-        response = []
         response_plain_text = ''
-        for response in self.run(messages=self.messages):
-            # Streaming output.
-            response_plain_text = typewriter_print(response, response_plain_text)
+        compact_response_text = ""
+        response_messages: List[Dict] = []
+        print("Debug.... ")
+
+        # Keep concise conversational memory for planning continuity.
+        # When pruning is enabled we retain only user + assistant summaries,
+        # while omitting raw tool messages to reduce token churn.
+        # combined_messages = select_context_messages(
+        #     self.messages,
+        #     self.prune_intermediate_task_contexts,
+        # )
+        # combined_messages = inject_execution_id_context(combined_messages, exec_context)
+
+        tmp = ""
+        assistant_answer  = ""
+        structured_messages: List[Dict] = []
+        print("Debug.... ")
+        print(self.messages)
+        try:
+            for response in self.run(messages=self.messages):
+                tmp = typewriter_print(response, tmp)
+                # Streaming output.
+                # response_plain_text = typewriter_print(response, response_plain_text)
+                # if self.prune_intermediate_task_contexts:
+                #     compact_response_text = compact_assistant_chunk_text(
+                #         response_plain_text,
+                #         self.compact_chunk_max_chars,
+                #     )
+                # if isinstance(response, dict):
+                #     response_messages.append(response)
+                pass
+
+            print("Debug.... ")
+            assistant_answer = response[-1]['content']
+            print(assistant_answer)
+            structured_messages = response
+        except Exception as e:
+            assistant_answer = f"Error: {type(e)} {str(e)}"
+            print("DEBUG", assistant_answer)
+
+
+            # response_plain_text = f"Error: {str(e)}"
+            # compact_response_text = compact_assistant_chunk_text(
+            #     response_plain_text,
+            #     self.compact_chunk_max_chars,
+            # )
+            # response_messages = [{"role": "assistant", "content": response_plain_text}]
+            # self.execution_cache[execution_id] = "FAILED"
+
+        # Determine whether this turn has verified tool-flow evidence.
+        runtime_tool_evidence = has_runtime_tool_evidence(structured_messages)
+
+        # Sanitize model-fabricated tool transcript tags only when no verified evidence exists.
+        # response_plain_text = sanitize_faux_tool_transcript(
+        #     response_plain_text,
+        #     response_messages,
+        #     has_verified_tool_evidence=has_verified_tool_evidence,
+        # )
+
+        # Mark SUCCESS only when runtime evidence exists and execution_id appears
+        # in structured tool/runtime messages.
+        # execution_id_present = tool_messages_contain_execution_id(response_messages, execution_id)
+        # if has_verified_tool_evidence and execution_id_present:
+        #     self.execution_cache[execution_id] = "SUCCESS"
+        #     print(f"✅ Execution {execution_id} marked SUCCESS (verified tool event)")
+        # else:
+        #     self.execution_cache[execution_id] = "FAILED"
+        #     print(f"❌ Execution {execution_id} marked FAILED (no verified tool event)")
+
+        # # Verify execution_ids before adding to history (sanitization point)
+        # verified_response, unverified_ids = verify_and_sanitize_execution_ids(
+        #     response_plain_text,
+        #     self.execution_cache,
+        # )
+        # if unverified_ids:
+        #     print(f"⚠️  Unverified execution IDs: {unverified_ids}")
+        # if verified_response != response_plain_text:
+        #     print(f"⚠️  Filtered unverified execution IDs from response")
+        #     response_plain_text = verified_response
+
+        # Add assistant/tool responses to history
+        # if response_messages:
+        #     self.messages.extend(response_messages)
+        # else:
+        #     self.messages.append(
+        #         {
+        #             "role": "assistant",
+        #             "content": response_plain_text,
+        #         }
+        #     )
+        if structured_messages:
+            self.messages.extend(structured_messages[-1:])
         
         # Memory Pruning 
-        if self.prune_intermediate_task_contexts:
-            print("Pruning intermediate memory. Keeping only user and task summary...")
-            self.messages = self.messages[:user_index_flag + 1] + [self.messages[-1]]
+        # if self.prune_intermediate_task_contexts:
+        #     print("Pruning intermediate memory. Keeping only user and task summary...")
+        #     self.messages = prune_session_history(
+        #         session_messages=self.messages,
+        #         user_index_flag=user_index_flag,
+        #         response_messages=response_messages,
+        #         response_text=response_plain_text,
+        #         compact_response_text=compact_response_text,
+        #     )
 
 
 if __name__ == "__main__":

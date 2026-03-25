@@ -262,6 +262,216 @@ class KubernetesListWorkloads(BaseTool):
             )
 
 
+@register_tool("kubernetes-get-namespace-resource-quota")
+class KubernetesGetNamespaceResourceQuota(BaseTool):
+    """Get ResourceQuota status for a namespace with compact, tabular-friendly output."""
+
+    description = (
+        "Get namespace ResourceQuota status (used vs hard) with compact output. "
+        "Returns raw quota maps and flattened rows for each tracked resource."
+    )
+
+    parameters = [
+        {
+            "name": "namespace",
+            "type": "string",
+            "description": "Target namespace",
+            "required": True,
+        },
+        {
+            "name": "execution_id",
+            "type": "string",
+            "description": "Optional execution ID provided by orchestrator",
+            "required": False,
+        },
+    ]
+
+    def call(self, params: str, **kwargs) -> str:
+        args: Dict[str, Any] = {}
+        try:
+            args = _parse_params(params)
+            namespace = args.get("namespace")
+            execution_id = args.get("execution_id")
+
+            if not namespace:
+                return _tool_response(
+                    {
+                        "success": False,
+                        "error": "namespace is required",
+                    },
+                    execution_id,
+                )
+
+            ok, stdout, stderr = _run_kubectl(
+                ["get", "resourcequota", "-n", namespace, "-o", "json"],
+                timeout_sec=30,
+            )
+            if not ok:
+                return _tool_response(
+                    {
+                        "success": False,
+                        "namespace": namespace,
+                        "error": stderr or "kubectl failed",
+                    },
+                    execution_id,
+                )
+
+            parsed = json.loads(stdout) if stdout else {"items": []}
+            items = parsed.get("items", [])
+
+            resource_quotas: Dict[str, Any] = {}
+            quota_rows: List[Dict[str, Any]] = []
+
+            for item in items:
+                metadata = item.get("metadata", {})
+                spec = item.get("spec", {})
+                status = item.get("status", {})
+
+                quota_name = metadata.get("name")
+                if not quota_name:
+                    continue
+
+                hard = status.get("hard", {}) or {}
+                used = status.get("used", {}) or {}
+                scopes = spec.get("scopes", []) or []
+
+                resource_quotas[quota_name] = {
+                    "hard": hard,
+                    "used": used,
+                    "scopes": scopes,
+                }
+
+                tracked_resources = sorted(set(hard.keys()) | set(used.keys()))
+                for resource_name in tracked_resources:
+                    quota_rows.append(
+                        {
+                            "quota": quota_name,
+                            "resource": resource_name,
+                            "used": used.get(resource_name),
+                            "hard": hard.get(resource_name),
+                        }
+                    )
+
+            return _tool_response(
+                {
+                    "success": True,
+                    "namespace": namespace,
+                    "summary": {
+                        "quota_count": len(resource_quotas),
+                        "row_count": len(quota_rows),
+                    },
+                    "resource_quotas": resource_quotas,
+                    "quota_rows": quota_rows,
+                },
+                execution_id,
+            )
+        except Exception as exc:
+            return _tool_response(
+                {
+                    "success": False,
+                    "error": str(exc),
+                },
+                args.get("execution_id"),
+            )
+
+
+@register_tool("kubernetes-get-namespace-events")
+class KubernetesGetNamespaceEvents(BaseTool):
+    """Get Kubernetes events for a namespace, sorted by lastTimestamp, truncated to last 20."""
+
+    description = (
+        "Fetch namespace events with compact, tabular-friendly output. "
+        "Always sorted by lastTimestamp, returning only the last 20 events."
+    )
+
+    parameters = [
+        {
+            "name": "namespace",
+            "type": "string",
+            "description": "Target namespace",
+            "required": True,
+        },
+        {
+            "name": "execution_id",
+            "type": "string",
+            "description": "Optional execution ID provided by orchestrator",
+            "required": False,
+        },
+    ]
+
+    def call(self, params: str, **kwargs) -> str:
+        args: Dict[str, Any] = {}
+        try:
+            args = _parse_params(params)
+            namespace = args.get("namespace")
+            execution_id = args.get("execution_id")
+
+            if not namespace:
+                return _tool_response(
+                    {"success": False, "error": "namespace is required"},
+                    execution_id,
+                )
+
+            ok, stdout, stderr = _run_kubectl(
+                [
+                    "get", "events",
+                    "-n", namespace,
+                    "--sort-by=.lastTimestamp",
+                    "-o", "json"
+                ],
+                timeout_sec=30,
+            )
+            if not ok:
+                return _tool_response(
+                    {
+                        "success": False,
+                        "namespace": namespace,
+                        "error": stderr or "kubectl failed",
+                    },
+                    execution_id,
+                )
+
+            parsed = json.loads(stdout) if stdout else {"items": []}
+            items = parsed.get("items", [])
+
+            # Only keep the last 20 events
+            items = items[-10:]
+
+            event_rows: List[Dict[str, Any]] = []
+            for item in items:
+                metadata = item.get("metadata", {})
+                involved = item.get("involvedObject", {})
+                reason = item.get("reason")
+                message = item.get("message")
+                last_ts = item.get("lastTimestamp")
+                type_ = item.get("type")
+
+                event_rows.append(
+                    {
+                        "resource": f'{involved.get("kind")}/{involved.get("name")}',
+                        "reason": reason,
+                        "message": message,
+                        "type": type_,
+                        "lastTimestamp": last_ts,
+                    }
+                )
+
+            return _tool_response(
+                {
+                    "success": True,
+                    "namespace": namespace,
+                    "event_count": len(event_rows),
+                    "events": event_rows,
+                },
+                execution_id,
+            )
+        except Exception as exc:
+            return _tool_response(
+                {"success": False, "error": str(exc)},
+                args.get("execution_id"),
+            )
+
+
 @register_tool("kubernetes-apply-resource-update")
 class KubernetesApplyResourceUpdate(BaseTool):
     """Apply resource and replica updates to common workload kinds."""

@@ -1,3 +1,4 @@
+# Actuators/Tools
 apiVersion: agents/v1
 kind: Actuators
 metadata:
@@ -7,10 +8,10 @@ metadata:
     type: autonomous
 spec:
   mcp-servers:
-    kubernetes:
-      type: "streamable-http"
-      url: "http://kubernetes-mcp-server:8081/mcp"
-      sse_read_timeout: 30
+    # kubernetes:
+    #   type: "streamable-http"
+    #   url: "http://kubernetes-mcp-server:8081/mcp"
+    #   sse_read_timeout: 30
     litmuschaos:
       command: "/app/actions/mcp/servers/litmus-chaos/litmuschaos-mcp-server"
       args: []
@@ -18,6 +19,10 @@ spec:
         CHAOS_CENTER_ENDPOINT: "http://172.25.152.192:32630"
         LITMUS_PROJECT_ID: "dadfe41f-505e-4023-bcbf-8e3b6033374c"
         LITMUS_ACCESS_TOKEN: "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJleHAiOjQ5MjcxMzYyMTQsInJvbGUiOiJhZG1pbiIsInVpZCI6IjEzMDk0NTg0LTE3M2YtNDRhMy1hNDFjLTcyN2NkMWFiYzBmNCIsInVzZXJuYW1lIjoiYWRtaW4ifQ.crBvQ6Pv2ss6QTsnZ-Sih_QfMqlLq6eu10k4X2PhYyi_HdXwDge6mhhAEK-amtbMRGHLq3IEmUqfhULNZw-RGQ"
+    mcp-time:
+      type: "stdio"
+      args: []
+      command: "/app/actions/mcp/servers/time/mcp-time"
   builtin-functions:
   - "helm-template"
   - "helm-list-releases"
@@ -25,5 +30,10 @@ spec:
   - "helm-upgrade"
   - "helm-rollback"
   - "helm-test"
-  exclude-tools:
-  - "kubernetes-configuration_view"
+  - "kafka-produce-message"
+  - "resource-collector"
+  - "kubernetes-list-workloads"
+  - "kubernetes-apply-resource-update"
+  - "kubernetes-get-namespace-resource-quota"
+  - "kubernetes-get-namespace-events"
+  exclude-tools: []

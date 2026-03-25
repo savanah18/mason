@@ -239,6 +239,7 @@ class ChatAgentBackend:
             # print(f"final structured message after every inference call {structured_messages}")
         except Exception as e:
             assistant_answer = f"Error: {str(e)}"
+            print("debug", assistant_answer)
 
         # Determine if tools called have response.
         runtime_tool_evidence = has_runtime_tool_evidence(structured_messages)
