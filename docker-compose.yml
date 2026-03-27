@@ -129,6 +129,7 @@ services:
     - ./agent/personas:/app/personas:rw
     - ./agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw # for dev purposes only
     - ./agent/templates:/app/templates:rw
+    - /root/workspace/lnd/aiops/vlm/Qwen/Qwen3-4B-Instruct-2507:/mnt/checkpoint:ro
     command: >
       python -u qwen-ops-agent.py 
     networks:
@@ -158,10 +159,12 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka-server:9092
       KUBECONFIG: /run/secrets/kubernetes-config
       PERSONA: resiliency-optimizer
+      <<: *prometheus-env
     volumes:
     - ./agent/personas:/app/personas:rw
     - ./agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw # for dev purposes only
     - ./agent/templates:/app/templates:rw
+    - /root/workspace/lnd/aiops/vlm/Qwen/Qwen3-4B-Instruct-2507:/mnt/checkpoint:ro
     command: >
       python -u qwen-ops-agent.py 
     networks:
@@ -196,6 +199,7 @@ services:
     - ./agent/qwen-chat-agent.py:/app/qwen-chat-agent.py:rw # for dev purposes only
     - ./agent/templates:/app/templates:rw
     - ./agent/actions/:/app/actions:rw
+    - /root/workspace/lnd/aiops/vlm/Qwen/Qwen3-4B-Instruct-2507:/mnt/checkpoint:ro
     command: >
       python -u qwen-chat-agent.py 
     ports:
@@ -222,7 +226,7 @@ services:
     - ./agent/personas:/app/personas:ro
     - ./agent/templates/llm/qwen.yaml:/app/templates/llm/qwen.yaml:ro
     command: >
-     uvx kubernetes-mcp-server@latest --port 8081 --kubeconfig /run/secrets/kubernetes-config 
+     /app/actions/mcp/servers/kubernetes/kubernetes-mcp-server --port 8081 --kubeconfig /run/secrets/kubernetes-config 
     # command: >
     #   sleep 6000
     ports:
@@ -274,24 +278,20 @@ services:
     networks:
       - triton-ai-network
 
-  ## Short-term
+  ## Memory Management
   redis:
-    image: redis:7-alpine
-    container_name: triton-ai-redis
+    image: redis/redis-stack-server:latest
+    container_name: redis
     ports:
       - "6379:6379"
-    command: >
-      redis-server
-      --maxmemory 512mb
-      --maxmemory-policy allkeys-lru
-      --save 60 1000
-      --appendonly yes
     volumes:
-      - ./data/redis:/data
+      - ./agent/memory/redis/data:/data
+    environment:
+      - REDIS_ARGS=--appendonly yes
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 30s
+      timeout: 10s
       retries: 3
     deploy:
       resources:
@@ -299,6 +299,33 @@ services:
           memory: 512M
     networks:
       - triton-ai-network
+
+  agent-memory-server-api:
+    image: redislabs/agent-memory-server:latest
+    container_name: agent-memory-server-api
+    ports:
+      - "8009:8000"
+    # env_file:
+    #   - path: .env
+    #     required: false
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - PORT=8000
+      - LONG_TERM_MEMORY=True
+      - ENABLE_TOPIC_EXTRACTION=True
+      - ENABLE_NER=True
+      - DISABLE_AUTH=true # For local development only
+    depends_on:
+      - redis
+    # volumes:
+    #   - ./agent_memory_server:/app/agent_memory_server
+    networks:
+      - triton-ai-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/v1/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 networks:
   triton-ai-network:

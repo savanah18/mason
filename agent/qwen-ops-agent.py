@@ -202,8 +202,9 @@ class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
                 pass
 
             print("Debug.... ")
-            assistant_answer = response[-1]['content']
+            assistant_answer = response[-1]['content'] # Most workflow agent answer are now in markdown format. 
             print(assistant_answer)
+
             structured_messages = response
         except Exception as e:
             assistant_answer = f"Error: {type(e)} {str(e)}"
@@ -219,7 +220,12 @@ class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
             # self.execution_cache[execution_id] = "FAILED"
 
         # Determine whether this turn has verified tool-flow evidence.
-        runtime_tool_evidence = has_runtime_tool_evidence(structured_messages)
+        runtime_tool_evidence, unverified_function_calls = has_runtime_tool_evidence(structured_messages)
+        if runtime_tool_evidence:
+            print("All tool calls verified!")
+        else:
+            assistant_answer = f"Unverified Tool Calls Found!"
+            print(assistant_answer)
 
         # Sanitize model-fabricated tool transcript tags only when no verified evidence exists.
         # response_plain_text = sanitize_faux_tool_transcript(
@@ -259,8 +265,15 @@ class QwenOpsAgent(BaseAgent, FromJsonMixin, Assistant):
         #             "content": response_plain_text,
         #         }
         #     )
-        if structured_messages:
+        if structured_messages and runtime_tool_evidence:
             self.messages.extend(structured_messages[-1:])
+        else:
+            self.messages.append(
+                {
+                    "role": "assistant",
+                    "content": assistant_answer,
+                }
+            )
         
         # Memory Pruning 
         # if self.prune_intermediate_task_contexts:

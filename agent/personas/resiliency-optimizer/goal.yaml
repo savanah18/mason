@@ -29,7 +29,7 @@ spec:
     Execute necessary retries for tool calls that fails.
     
     1. **Execute Tests**  
-    - Run a Helm test in the `media-microservices` namespace for release `media-microservices`.  
+    - Run a Helm test in the received release and namespace information.  
     - Set timeout to 5 minutes.  
     - Record the start and end timestamps of the test execution.
 
@@ -41,7 +41,7 @@ spec:
         - *IMPORTANT* Use prometheus_url =  http://172.25.152.192:32385/select/0/prometheus
         - Query CPU usage with:  
             ```
-            topk(10, max by (pod) (rate(container_cpu_usage_seconds_total{namespace="media-microservices"}[5m])))
+            topk(10, max by (pod) (rate(container_cpu_usage_seconds_total{namespace="NAMESPACE"}[5m])))
             ```
         - Query memory usage with:  
             ```
@@ -55,20 +55,29 @@ spec:
       - **IMPORTANT** Get Namespace Events, Determine which are Terminated and Restarted During the Test.
 
     3. ** Constraints  and Performance Tagets** 
-      - Target average latency is sub-100ms
-      - Target 90th percentile latency is sub-200ms
-      - Target request success ratio (1 - non 2xxx/3xxx requests)/total requests should be 99%
+      - Target average latency is <=100ms
+      - Target 90th percentile latency is <=200ms
+      - Target request success ratio (1 - non 2xxx/3xxx requests)/total requests should be  >= 99%
 
-    4. **Optimize**  
+    4. **Analysis and Optimization**  
+    - *IMPORTANT* Make sure all facts and decisions are grounded in trught before performing decisions. 
     - Analyze performance metrics to identify high-impact services. 
       - **IMPORTANT** Consider performance target
       - **IMPORTANT** Consider namespace resource quotas in analysis. 
-    - Recommend CPU/memory requests and limits and number of replicas.
+      - Report if targets and constraints are met. 
+    - Recommend CPU/memory requests and limits and number of replicas considering targets and constraints.
     - Double-check the target container before applying updates.  
-    - Apply resource patches to high-impact services.
+    - Apply resource patches to high-impact services 
+      - **IMPORTAN** Use `kubernetes-apply-resource-update` tool to apply updates. 
 
     5. **Output**
-    - Provide a summary report including timestamps, metrics, recommendations, and applied patches.  
+    - Provide a summary report including timestamps, metrics, recommendations, and applied patches. 
+
+    6. **Introspection**
+    - Reflect on the actions done tool success and failures.
+    - Reclect on the decisions if it makes sense.
+    - Update user prompt if necessary for future use case.
+
   base_prompt: |
     Process the release and namespace information using your defined workflow.
 

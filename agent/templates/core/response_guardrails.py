@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import re
 from typing import Dict, List, Tuple
+import json
+import redis
 
+
+def verify_execution_status(exec_id, llm_result):
+    r = redis.Redis(host="redis", port=6379, decode_responses=True)
+    record = r.hgetall(f"tool_execution:{exec_id}")
+    runtime_result = json.loads(record["result"])
+    return runtime_result == llm_result
 
 def has_runtime_tool_evidence(response_messages: List[Dict]) -> bool:
     function_called = set()
@@ -10,8 +18,17 @@ def has_runtime_tool_evidence(response_messages: List[Dict]) -> bool:
         if message.get('role') == "assistant" and 'function_id' in message.get('extra'):
             function_called.add(message.get('extra').get('function_id'))
         if message.get('role') == "function" and 'function_id' in message.get('extra'):
-            function_called.remove(message.get('extra').get('function_id'))
-    return not(function_called) # return true if there no existing functions to be called
+            content = json.loads(message.get('content'))
+            exec_id = content.get('exec_id')
+            if exec_id:
+                # for built-in, we attest.
+                if verify_execution_status(exec_id, content):
+                    function_called.remove(message.get('extra').get('function_id'))
+            else:
+                # for non built-in we trust.
+                function_called.remove(message.get('extra').get('function_id'))
+            
+    return not(function_called), function_called # return true if there no existing functions to be called
 
 def tool_messages_contain_execution_id(response_messages: List[Dict], execution_id: str) -> bool:
     """Return True when execution_id appears in streamed structured payload."""

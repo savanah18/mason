@@ -239,10 +239,13 @@ class ChatAgentBackend:
             # print(f"final structured message after every inference call {structured_messages}")
         except Exception as e:
             assistant_answer = f"Error: {str(e)}"
-            print("debug", assistant_answer)
 
         # Determine if tools called have response.
-        runtime_tool_evidence = has_runtime_tool_evidence(structured_messages)
+        runtime_tool_evidence,unverified_function_calls  = has_runtime_tool_evidence(structured_messages)
+        if runtime_tool_evidence:
+            print("All tool calls verified!")
+        else:
+            assistant_answer = f"Unverified Tool Calls Found!"
 
         # Sanitize model-fabricated tool transcript tags only when no verified evidence exists.
         # response_text = sanitize_faux_tool_transcript(

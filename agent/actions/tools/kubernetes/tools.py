@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import json5
 from qwen_agent.tools.base import BaseTool, register_tool
 
+from ..utils.traceability import TRACEABILITY_PARAMS_ADD_ONS, MemoryTraceableTool, ToolExecStatus
 
 def _parse_params(params: Any) -> Dict[str, Any]:
     if isinstance(params, dict):
@@ -20,13 +21,6 @@ def _parse_params(params: Any) -> Dict[str, Any]:
         parsed = json5.loads(params)
         return parsed if isinstance(parsed, dict) else {}
     return {}
-
-
-def _tool_response(payload: Dict[str, Any], execution_id: Optional[str] = None) -> str:
-    response = dict(payload)
-    if execution_id:
-        response["execution_id"] = execution_id
-    return json5.dumps(response, ensure_ascii=False)
 
 
 def _run_kubectl(args: List[str], timeout_sec: int = 30) -> Tuple[bool, str, str]:
@@ -169,8 +163,9 @@ def _merge_resource_updates(
 
 
 @register_tool("kubernetes-list-workloads")
-class KubernetesListWorkloads(BaseTool):
+class KubernetesListWorkloads(MemoryTraceableTool):
     """List key Kubernetes workloads with compact output."""
+    tool_name = "kubernetes-list-workloads"
 
     description = (
         "List workloads in a namespace as a compact mapping by kind and workload name. "
@@ -183,30 +178,16 @@ class KubernetesListWorkloads(BaseTool):
             "type": "string",
             "description": "Target namespace",
             "required": True,
-        },
-        {
-            "name": "execution_id",
-            "type": "string",
-            "description": "Optional execution ID provided by orchestrator",
-            "required": False,
-        },
-    ]
+        }
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         args: Dict[str, Any] = {}
         try:
             args = _parse_params(params)
+            exec_id = self._pre_call(self.tool_name, args)
             namespace = args.get("namespace")
             execution_id = args.get("execution_id")
-
-            if not namespace:
-                return _tool_response(
-                    {
-                        "success": False,
-                        "error": "namespace is required",
-                    },
-                    execution_id,
-                )
 
             # Pods are intentionally excluded to keep payloads compact.
             kinds = ["deployment", "statefulset", "job", "cronjob", "daemonset"]
@@ -251,21 +232,23 @@ class KubernetesListWorkloads(BaseTool):
                 output[output_key_by_kind[kind]] = mapped
                 output["summary"][kind] = {"count": len(mapped)}
 
-            return _tool_response(output, execution_id)
-        except Exception as exc:
-            return _tool_response(
-                {
-                    "success": False,
-                    "error": str(exc),
-                },
-                args.get("execution_id"),
-            )
+            self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=output)
+            return json.dumps(output, ensure_ascii=False)
+        except Exception as e:
+            output = {
+                "success": False,
+                "error": str(e),
+                "exec_id": exec_id
+            }
+            self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+            return json.dumps(output, ensure_ascii=False)
 
 
 @register_tool("kubernetes-get-namespace-resource-quota")
 class KubernetesGetNamespaceResourceQuota(BaseTool):
     """Get ResourceQuota status for a namespace with compact, tabular-friendly output."""
-
+    tool_name = "kubernetes-get-namespace-resource-quota"
+    
     description = (
         "Get namespace ResourceQuota status (used vs hard) with compact output. "
         "Returns raw quota maps and flattened rows for each tracked resource."
@@ -277,44 +260,29 @@ class KubernetesGetNamespaceResourceQuota(BaseTool):
             "type": "string",
             "description": "Target namespace",
             "required": True,
-        },
-        {
-            "name": "execution_id",
-            "type": "string",
-            "description": "Optional execution ID provided by orchestrator",
-            "required": False,
-        },
-    ]
+        }
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         args: Dict[str, Any] = {}
         try:
             args = _parse_params(params)
+            exec_id = self._pre_call(self.tool_name, args)
             namespace = args.get("namespace")
-            execution_id = args.get("execution_id")
-
-            if not namespace:
-                return _tool_response(
-                    {
-                        "success": False,
-                        "error": "namespace is required",
-                    },
-                    execution_id,
-                )
 
             ok, stdout, stderr = _run_kubectl(
                 ["get", "resourcequota", "-n", namespace, "-o", "json"],
                 timeout_sec=30,
             )
             if not ok:
-                return _tool_response(
-                    {
-                        "success": False,
-                        "namespace": namespace,
-                        "error": stderr or "kubectl failed",
-                    },
-                    execution_id,
-                )
+                output = {
+                    "success": False,
+                    "namespace": namespace,
+                    "error": stderr or "kubectl failed",
+                    "exec_id": exec_id
+                }
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+                return json.dumps(output, ensure_ascii=False)
 
             parsed = json.loads(stdout) if stdout else {"items": []}
             items = parsed.get("items", [])
@@ -352,32 +320,33 @@ class KubernetesGetNamespaceResourceQuota(BaseTool):
                         }
                     )
 
-            return _tool_response(
-                {
-                    "success": True,
-                    "namespace": namespace,
-                    "summary": {
-                        "quota_count": len(resource_quotas),
-                        "row_count": len(quota_rows),
-                    },
-                    "resource_quotas": resource_quotas,
-                    "quota_rows": quota_rows,
+            output = {
+                "success": True,
+                "namespace": namespace,
+                "summary": {
+                    "quota_count": len(resource_quotas),
+                    "row_count": len(quota_rows),
                 },
-                execution_id,
-            )
-        except Exception as exc:
-            return _tool_response(
-                {
-                    "success": False,
-                    "error": str(exc),
-                },
-                args.get("execution_id"),
-            )
+                "resource_quotas": resource_quotas,
+                "quota_rows": quota_rows,
+                "execution_id": 
+            }
+            self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=output)
+            return json.dumps(output, ensure_ascii=False)
+        except Exception as e:
+            output = {
+                "success": False,
+                "error": str(e)
+                "exec_id": exec_id
+            }
+            self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+            return json.dumps(output, ensure_ascii=False)
 
 
 @register_tool("kubernetes-get-namespace-events")
 class KubernetesGetNamespaceEvents(BaseTool):
     """Get Kubernetes events for a namespace, sorted by lastTimestamp, truncated to last 20."""
+    tool_name = "kubernetes-get-namespace-events"
 
     description = (
         "Fetch namespace events with compact, tabular-friendly output. "
@@ -390,21 +359,15 @@ class KubernetesGetNamespaceEvents(BaseTool):
             "type": "string",
             "description": "Target namespace",
             "required": True,
-        },
-        {
-            "name": "execution_id",
-            "type": "string",
-            "description": "Optional execution ID provided by orchestrator",
-            "required": False,
-        },
-    ]
+        }
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         args: Dict[str, Any] = {}
         try:
             args = _parse_params(params)
+            exec_id = self._pre_call(self.tool_name, args)
             namespace = args.get("namespace")
-            execution_id = args.get("execution_id")
 
             if not namespace:
                 return _tool_response(
@@ -422,14 +385,14 @@ class KubernetesGetNamespaceEvents(BaseTool):
                 timeout_sec=30,
             )
             if not ok:
-                return _tool_response(
-                    {
-                        "success": False,
-                        "namespace": namespace,
-                        "error": stderr or "kubectl failed",
-                    },
-                    execution_id,
-                )
+                output = {
+                    "success": False,
+                    "namespace": namespace,
+                    "error": stderr or "kubectl failed",
+                    "exec_id": exec_id
+                }
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+                return json.dumps(output, ensure_ascii=False)
 
             parsed = json.loads(stdout) if stdout else {"items": []}
             items = parsed.get("items", [])
@@ -456,25 +419,29 @@ class KubernetesGetNamespaceEvents(BaseTool):
                     }
                 )
 
-            return _tool_response(
-                {
-                    "success": True,
-                    "namespace": namespace,
-                    "event_count": len(event_rows),
-                    "events": event_rows,
-                },
-                execution_id,
-            )
-        except Exception as exc:
-            return _tool_response(
-                {"success": False, "error": str(exc)},
-                args.get("execution_id"),
-            )
+            output = {
+                "success": True,
+                "namespace": namespace,
+                "event_count": len(event_rows),
+                "events": event_rows,
+                "exec_id": exec_id
+            }
+            self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=output)
+            return json.dumps(output, ensure_ascii=False)
+        except Exception as e:
+            output = {
+                "success": False,
+                "error": str(e)
+                "exec_id": exec_id
+            }
+            self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+            return json.dumps(output, ensure_ascii=False)
 
 
 @register_tool("kubernetes-apply-resource-update")
 class KubernetesApplyResourceUpdate(BaseTool):
     """Apply resource and replica updates to common workload kinds."""
+    tool_name = "kubernetes-apply-resource-update"
 
     description = (
         "Apply CPU/memory request/limit updates and optional replicas to pods, deployments, "
@@ -541,33 +508,27 @@ class KubernetesApplyResourceUpdate(BaseTool):
             "type": "boolean",
             "description": "If true, validates without applying changes",
             "required": False,
-        },
-        {
-            "name": "execution_id",
-            "type": "string",
-            "description": "Optional execution ID provided by orchestrator",
-            "required": False,
-        },
-    ]
+        }
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         args: Dict[str, Any] = {}
         try:
             args = _parse_params(params)
+            exec_id = self._pre_call(self.tool_name, args)
             kind = str(args["kind"]).strip().lower()
             name = str(args["name"]).strip()
             namespace = str(args["namespace"]).strip()
-            execution_id = args.get("execution_id")
 
             supported = {"pod", "deployment", "statefulset", "job", "daemonset", "cronjob"}
             if kind not in supported:
-                return _tool_response(
-                    {
-                        "success": False,
-                        "error": f"Unsupported kind '{kind}'. Supported: {sorted(supported)}",
-                    },
-                    execution_id,
-                )
+                output = {
+                    "success": False,
+                    "error": f"Unsupported kind '{kind}'. Supported: {sorted(supported)}",
+                    "exec_id": exec_id
+                }
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+                return json.dumps(output, ensure_ascii=False)
 
             cpu_request = args.get("cpu_request")
             cpu_limit = args.get("cpu_limit")
@@ -580,68 +541,68 @@ class KubernetesApplyResourceUpdate(BaseTool):
             if replicas is not None:
                 replicas = int(replicas)
                 if replicas < 1:
-                    return _tool_response(
-                        {
-                            "success": False,
-                            "error": "replicas must be a positive integer",
-                        },
-                        execution_id,
-                    )
+                    output = {
+                        "success": False,
+                        "error": "replicas must be a positive integer",
+                        "exec_id": exec_id
+                    }
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+                    return json.dumps(output, ensure_ascii=False)
 
             if cpu_request and not _validate_cpu_unit(str(cpu_request)):
-                return _tool_response(
-                    {
-                        "success": False,
-                        "error": "cpu_request must use millicores format like 50m",
-                    },
-                    execution_id,
-                )
+                output = {
+                    "success": False,
+                    "error": "cpu_request must use millicores format like 50m",
+                    "exec_id": exec_id
+                }
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+                return json.dumps(output, ensure_ascii=False)
             if cpu_limit and not _validate_cpu_unit(str(cpu_limit)):
-                return _tool_response(
-                    {
-                        "success": False,
-                        "error": "cpu_limit must use millicores format like 200m",
-                    },
-                    execution_id,
-                )
+                output = {
+                    "success": False,
+                    "error": "cpu_limit must use millicores format like 200m",
+                    "exec_id": exec_id
+                }
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+                return json.dumps(output, ensure_ascii=False)
             if memory_request and not _validate_memory_unit(str(memory_request)):
-                return _tool_response(
-                    {
-                        "success": False,
-                        "error": "memory_request must use Mi/Gi format like 256Mi or 1Gi",
-                    },
-                    execution_id,
-                )
+                output = {
+                    "success": False,
+                    "error": "memory_request must use Mi/Gi format like 256Mi or 1Gi",
+                    "exec_id": exec_id
+                }
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+                return json.dumps(output, ensure_ascii=False)
             if memory_limit and not _validate_memory_unit(str(memory_limit)):
-                return _tool_response(
-                    {
-                        "success": False,
-                        "error": "memory_limit must use Mi/Gi format like 512Mi or 2Gi",
-                    },
-                    execution_id,
-                )
+                output = {
+                    "success": False,
+                    "error": "memory_limit must use Mi/Gi format like 512Mi or 2Gi",
+                    "exec_id": exec_id
+                }
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+                return json.dumps(output, ensure_ascii=False)
 
             if not any([cpu_request, cpu_limit, memory_request, memory_limit, replicas]):
-                return _tool_response(
-                    {
-                        "success": False,
-                        "error": "No updates provided. Set at least one resource field or replicas.",
-                    },
-                    execution_id,
-                )
+                output = {
+                    "success": False,
+                    "error": "No updates provided. Set at least one resource field or replicas.",
+                    "exec_id": exec_id
+                }
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+                return json.dumps(output, ensure_ascii=False)
 
             ok, stdout, stderr = _run_kubectl(
                 ["get", kind, name, "-n", namespace, "-o", "json"],
                 timeout_sec=30,
             )
             if not ok:
-                return _tool_response(
-                    {
-                        "success": False,
-                        "error": stderr or "Failed to fetch current resource",
-                    },
-                    execution_id,
-                )
+                output = {
+                    "success": False,
+                    "error": stderr or "Failed to fetch current resource",
+                    "exec_id": exec_id
+                }
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+                return json.dumps(output, ensure_ascii=False)
 
             obj = json.loads(stdout)
             updated = _merge_resource_updates(
@@ -671,33 +632,32 @@ class KubernetesApplyResourceUpdate(BaseTool):
             )
 
             if proc.returncode != 0:
-                return _tool_response(
-                    {
-                        "success": False,
-                        "error": proc.stderr.strip() or proc.stdout.strip() or "kubectl apply failed",
-                    },
-                    execution_id,
-                )
+                output = {
+                    "success": False,
+                    "error": proc.stderr.strip() or proc.stdout.strip() or "kubectl apply failed",
+                    "exec_id": exec_id
+                }
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+                return json.dumps(output, ensure_ascii=False)
 
-            return _tool_response(
-                {
-                    "success": True,
-                    "kind": kind,
-                    "name": name,
-                    "namespace": namespace,
-                    "dry_run": dry_run,
-                    "updated_fields": {
-                        "container": container or "*",
-                        "cpu_request": cpu_request,
-                        "cpu_limit": cpu_limit,
-                        "memory_request": memory_request,
-                        "memory_limit": memory_limit,
-                        "replicas": replicas,
-                    },
-                    "result": proc.stdout.strip(),
+            output = {
+                "success": True,
+                "kind": kind,
+                "name": name,
+                "namespace": namespace,
+                "dry_run": dry_run,
+                "updated_fields": {
+                    "container": container or "*",
+                    "cpu_request": cpu_request,
+                    "cpu_limit": cpu_limit,
+                    "memory_request": memory_request,
+                    "memory_limit": memory_limit,
+                    "replicas": replicas,
                 },
-                execution_id,
-            )
+                "result": proc.stdout.strip(),
+                "exec_id": exec_id
+            }
+            return json.dumps(output, ensure_ascii=False)
         except Exception as exc:
             return _tool_response(
                 {

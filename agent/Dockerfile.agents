@@ -38,6 +38,7 @@ COPY --from=templates ./ ./templates
 COPY --from=actions ./ ./actions
 
 # Install needed mcp servers
-RUN uvx kubernetes-mcp-server@latest -h
+
+# RUN uvx kubernetes-mcp-server@latest -h
 
 ENTRYPOINT ["/app/entrypoint.sh"]
