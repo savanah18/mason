@@ -19,9 +19,7 @@ from templates.core.context_compaction import (
 from templates.core.mcp_compat import apply_mcp_ping_compat_patch
 from templates.core.response_guardrails import (
     has_runtime_tool_evidence,
-    sanitize_faux_tool_transcript,
-    tool_messages_contain_execution_id,
-    verify_and_sanitize_execution_ids,
+    sanitize_faux_tool_transcript
 )
 
 from qwen_agent.agents import Assistant

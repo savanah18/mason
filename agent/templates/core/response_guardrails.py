@@ -18,6 +18,8 @@ def has_runtime_tool_evidence(response_messages: List[Dict]) -> bool:
         if message.get('role') == "assistant" and 'function_id' in message.get('extra'):
             function_called.add(message.get('extra').get('function_id'))
         if message.get('role') == "function" and 'function_id' in message.get('extra'):
+            print("DEBUG", message)
+            print("DEBUG", message.get('content'))
             content = json.loads(message.get('content'))
             exec_id = content.get('exec_id')
             if exec_id:
@@ -29,42 +31,6 @@ def has_runtime_tool_evidence(response_messages: List[Dict]) -> bool:
                 function_called.remove(message.get('extra').get('function_id'))
             
     return not(function_called), function_called # return true if there no existing functions to be called
-
-def tool_messages_contain_execution_id(response_messages: List[Dict], execution_id: str) -> bool:
-    """Return True when execution_id appears in streamed structured payload."""
-    if not execution_id:
-        return False
-
-    for msg in response_messages:
-        if execution_id in str(msg):
-            return True
-    return False
-
-
-def verify_and_sanitize_execution_ids(
-    response_text: str,
-    execution_cache: Dict[str, str],
-) -> Tuple[str, List[str]]:
-    """Mask unverified execution IDs in the response text."""
-    pattern = r"exec-[a-zA-Z0-9\-]{20,}"
-    matches = re.findall(pattern, response_text)
-
-    if not matches:
-        return response_text, []
-
-    unverified: List[str] = []
-    for exec_id in set(matches):
-        if execution_cache.get(exec_id) != "SUCCESS":
-            unverified.append(exec_id)
-
-    if not unverified:
-        return response_text, []
-
-    filtered_response = response_text
-    for exec_id in unverified:
-        filtered_response = filtered_response.replace(exec_id, f"[UNVERIFIED-{exec_id[:8]}]")
-
-    return filtered_response, unverified
 
 
 def sanitize_faux_tool_transcript(

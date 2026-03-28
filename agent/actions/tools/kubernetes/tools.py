@@ -245,7 +245,7 @@ class KubernetesListWorkloads(MemoryTraceableTool):
 
 
 @register_tool("kubernetes-get-namespace-resource-quota")
-class KubernetesGetNamespaceResourceQuota(BaseTool):
+class KubernetesGetNamespaceResourceQuota(MemoryTraceableTool):
     """Get ResourceQuota status for a namespace with compact, tabular-friendly output."""
     tool_name = "kubernetes-get-namespace-resource-quota"
     
@@ -329,14 +329,14 @@ class KubernetesGetNamespaceResourceQuota(BaseTool):
                 },
                 "resource_quotas": resource_quotas,
                 "quota_rows": quota_rows,
-                "execution_id": 
+                "exec_id": exec_id
             }
             self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=output)
             return json.dumps(output, ensure_ascii=False)
         except Exception as e:
             output = {
                 "success": False,
-                "error": str(e)
+                "error": str(e),
                 "exec_id": exec_id
             }
             self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
@@ -344,7 +344,7 @@ class KubernetesGetNamespaceResourceQuota(BaseTool):
 
 
 @register_tool("kubernetes-get-namespace-events")
-class KubernetesGetNamespaceEvents(BaseTool):
+class KubernetesGetNamespaceEvents(MemoryTraceableTool):
     """Get Kubernetes events for a namespace, sorted by lastTimestamp, truncated to last 20."""
     tool_name = "kubernetes-get-namespace-events"
 
@@ -431,7 +431,7 @@ class KubernetesGetNamespaceEvents(BaseTool):
         except Exception as e:
             output = {
                 "success": False,
-                "error": str(e)
+                "error": str(e),
                 "exec_id": exec_id
             }
             self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
@@ -439,7 +439,7 @@ class KubernetesGetNamespaceEvents(BaseTool):
 
 
 @register_tool("kubernetes-apply-resource-update")
-class KubernetesApplyResourceUpdate(BaseTool):
+class KubernetesApplyResourceUpdate(MemoryTraceableTool):
     """Apply resource and replica updates to common workload kinds."""
     tool_name = "kubernetes-apply-resource-update"
 
@@ -659,10 +659,10 @@ class KubernetesApplyResourceUpdate(BaseTool):
             }
             return json.dumps(output, ensure_ascii=False)
         except Exception as exc:
-            return _tool_response(
-                {
-                    "success": False,
-                    "error": str(exc),
-                },
-                args.get("execution_id"),
-            )
+            output = {
+                "success": False,
+                "error": str(e),
+                "exec_id": exec_id
+            }
+            self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+            return json.dumps(output, ensure_ascii=False)

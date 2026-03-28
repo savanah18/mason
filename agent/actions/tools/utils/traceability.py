@@ -1,8 +1,9 @@
-import redis
+import os
 import uuid
-from enum import StrEnum
 import json
+from enum import StrEnum
 
+import redis
 from qwen_agent.tools.base import BaseTool
 
 # Traceability Paramaters 
@@ -15,6 +16,7 @@ TRACEABILITY_PARAMS_ADD_ONS  = [
     }
 ]
 
+REDIS_MESSAGE_TTL_SEC = int(os.getenv("REDIS_MESSAGE_TTL_SEC", 3600*24))
 
 class ToolExecStatus(StrEnum):
     PENDING     = "Pending"
@@ -40,7 +42,7 @@ class MemoryTraceableTool(BaseTool):
                 "result": json.dumps(result)
             }
         )
-        self.mem_client.expire(f"tool_execution:{exec_id}", 3600)
+        self.mem_client.expire(f"tool_execution:{exec_id}", REDIS_MESSAGE_TTL_SEC)
 
     def _pre_call(self, tool_name, args):
         exec_id = str(uuid.uuid4())

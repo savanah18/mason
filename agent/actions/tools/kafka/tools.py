@@ -91,7 +91,6 @@ class KafkaProduceMessage(MemoryTraceableTool):
             self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
             return json.dumps(result, ensure_ascii=False)
         except Exception as e:
-            raise(e)
             result = {
                 "success": False,
                 "error": str(e),

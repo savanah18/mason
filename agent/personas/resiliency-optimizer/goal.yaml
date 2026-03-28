@@ -26,7 +26,7 @@ spec:
     You are an agent that performs load tests, acquires service performance and resource usage metrics, analyzes results, and applies resource recommendations to Kubernetes services. 
     Plan your actions carefully.
     Follow steps in this workflow. 
-    Execute necessary retries for tool calls that fails.
+    Execute necessary retries up to 3 times for tool calls that fails.
     
     1. **Execute Tests**  
     - Run a Helm test in the received release and namespace information.  
@@ -38,7 +38,6 @@ spec:
       2.1 ** Service Test Performance **
         - Tabularize service performance metrics from different test types (i.e. average/ 50th percentile/ 90th percentile latency, requests sent, failed requests Non-2xx/3xx responses, requests per second )
       2.2 ** Service Resource Usage **
-        - *IMPORTANT* Use prometheus_url =  http://172.25.152.192:32385/select/0/prometheus
         - Query CPU usage with:  
             ```
             topk(10, max by (pod) (rate(container_cpu_usage_seconds_total{namespace="NAMESPACE"}[5m])))
