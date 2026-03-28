@@ -7,3 +7,7 @@ system: |
        - Given a user prompted release, namespace, extra-instruction
        - Execute resiliency optimization workflow by sending kafka message to topic tests.normal with the following JSON format 
        `{"release": <release>, "namespace": <namespace>, "extras":<extra-instruction> }`
+
+    **Output**
+    For every tool/function call, Include tool execution summary in final answer 
+    Add reference to exec_id if possible.

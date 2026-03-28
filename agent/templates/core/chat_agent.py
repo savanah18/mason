@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 import yaml
 from fastapi import FastAPI
 
+# Model
 from qwen_agent.agents import Assistant
 from qwen_agent.tools.mcp_manager import MCPManager
 from qwen_agent.utils.output_beautify import typewriter_print
@@ -17,11 +18,16 @@ from templates.core.context_compaction import (
     prune_session_history,
     select_context_messages,
 )
+
+
+# Memory Managment
 from transformers import AutoTokenizer
+from agent_memory_client import MemoryAPIClient, MemoryClientConfig
+from agent_memory_client.models import WorkingMemory
 
 from templates.core.mcp_compat import apply_mcp_ping_compat_patch
-from templates.core.response_guardrails import (
-    has_runtime_tool_evidence,
+from templates.core.tool_verification import (
+    process_tool_executions,
     sanitize_faux_tool_transcript
 )
 
@@ -34,8 +40,7 @@ class ChatAgentBackend:
         self.mcp_tools_count = 0
         self.prune_intermediate_task_contexts = kwargs.get("prune_intermediate_task_contexts", False)
         self.compact_chunk_max_chars = int(os.getenv("COMPACT_CHUNK_MAX_CHARS", "1800"))
-        # Execution cache: execution_id -> "IN_PROGRESS" | "SUCCESS" | "FAILED"
-        self.execution_cache: Dict[str, str] = {}
+
         if self.prune_intermediate_task_contexts:
             print("[W] Prune Intermediate task contexts enabled...")
         self._initialize_agent(
@@ -62,14 +67,20 @@ class ChatAgentBackend:
         mcp_config = self._initialize_mcp_cfg(actuators)
         tools = self._load_mcp_tools(mcp_config)
         self.mcp_tools_count = len(tools)
+        # Memory 
+        self.memory_client = self._initialize_memory_manager()
         
         # Create agent
+        # TODO Integrate to memory server
+        system_prompt = prompts.get("system")
         self.agent = Assistant(
             llm=llm_cfg,
-            system_message=prompts.get("system"),
+            system_message=system_prompt,
             function_list=tools + mcp_config["builtin-functions"],
             files=[]
         )
+
+        print(f"Initializing agent with system prompt {system_prompt}")
 
     def _initialize_llm_cfg(self, config_path="./config/llm.yaml"):
         try:
@@ -138,32 +149,48 @@ class ChatAgentBackend:
         
         print(f"✓ Qwen Agent initialized with {len(result['tools'])}")
         return result["tools"]
-    
-    def create_session(self) -> str:
+
+    def _initialize_memory_manager(self) -> MemoryAPIClient :
+        """Initialize Memory Manager"""
+        memory_client_config = MemoryClientConfig(
+            base_url = os.getenv("AGENT_MEMORY_SERVER_URL", "http://agent-memory-server-api:8000"),
+            default_namespace = "chat"
+        )
+        return MemoryAPIClient(memory_client_config)
+
+    async def create_session(self) -> str:
         """Create a new chat session."""
         session_id = str(uuid.uuid4())
-        self.sessions[session_id] = {
-            "messages": [],
-            "created_at": datetime.utcnow().isoformat(),
-            "last_updated": datetime.utcnow().isoformat(),
-        }
+        # TO BE DEPRECATED
+        # self.sessions[session_id] = {
+        #     "messages": [],
+        #     "created_at": datetime.utcnow().isoformat(),
+        #     "last_updated": datetime.utcnow().isoformat(),
+        # }
+        print("Sessions: ", self.sessions)
+        await self.memory_client.get_or_create_working_memory(
+            session_id = session_id,
+            user_id = self.__class__.__name__
+        )
+        self.sessions[session_id] =  {}
+        
         print(f"📝 Created session: {session_id}")
         return session_id
     
-    def get_session(self, session_id: str) -> Optional[Dict]:
+    async def get_session(self, session_id: str) -> tuple[bool, WorkingMemory]:
         """Get session by ID."""
-        return self.sessions.get(session_id)
+        created, session = await self.memory_client.get_or_create_working_memory(
+            session_id = session_id,
+            user_id = self.__class__.__name__,
+        )
+        return created, session
     
     def clear_session(self, session_id: str) -> bool:
         """Clear a chat session and cleanup execution cache for this session."""
         if session_id in self.sessions:
-            self.sessions[session_id]["messages"] = []
-            self.sessions[session_id]["last_updated"] = datetime.utcnow().isoformat()
-            # Clean up execution cache entries for this session (they're scoped by session_id in the key)
-            self.execution_cache = {
-                k: v for k, v in self.execution_cache.items()
-                if not k.startswith(session_id[:8])
-            }
+            # TODO promote to long-term before 
+            # self.sessions[session_id]["messages"] = []
+            # self.sessions[session_id]["last_updated"] = datetime.utcnow().isoformat()
             print(f"🗑 Cleared session: {session_id}")
             return True
         return False
@@ -171,142 +198,87 @@ class ChatAgentBackend:
     def delete_session(self, session_id: str) -> bool:
         """Delete a session and cleanup execution cache."""
         if session_id in self.sessions:
-            del self.sessions[session_id]
-            self.execution_cache = {
-                k: v for k, v in self.execution_cache.items()
-                if not k.startswith(session_id[:8])
-            }
-            print(f"🗑 Deleted session: {session_id}")
+            # TODO promote to long-term before
+            # del self.sessions[session_id]
+            # print(f"🗑 Deleted session: {session_id}")
             return True
         return False
 
     def compute_context_length(self, messages: List = []):
-        text = "".join([m["role"] + ": " + m["content"] for m in messages])
+        # print(f"Computing context length for  {messages}")
+        text = "".join([m.dict()["role"] + ": " + m.dict()["content"] for m in messages])
         tokens = self.tokenizer.encode(text)
         return len(tokens)
     
-    def send_message(self, session_id: str, user_message: str) -> tuple[str, int, int]:
+    async def send_message(self, session_id: str, user_message: str) -> tuple[str, int, int]:
         """Send a message and get response with execution verification. Returns (response_text, context_length, input_length)."""
         if not self.agent:
             raise ValueError("Agent not initialized")
         
-        session = self.get_session(session_id)
+        _, session  = await self.get_session(session_id)
+        session : WorkingMemory
         if not session:
             raise ValueError(f"Session {session_id} not found")
         
-        # Generate execution ID for this turn and mark as IN_PROGRESS
-        # execution_id = f"exec-{session_id[:8]}-{uuid.uuid4().hex[:8]}"
-        # self.execution_cache[execution_id] = "IN_PROGRESS"
-        # print(f"🔐 Generated execution_id: {execution_id}")
-        
-        # exec_context = f"\nNote: Include this execution_id in tool calls: {execution_id}"
         
         # Add user message to history
-        messages = session["messages"]
-        messages.append({"role": "user", "content": user_message})
+        session.messages.append({"role": "user", "content": user_message})
+        messages = [m.dict() if type(m)!=dict else m for m in session.messages]
         user_index_flag = len(messages) - 1
         print(f"📝 After adding user message: {len(messages)} messages in history")
-        
-        # Keep concise conversational memory for planning continuity.
-        # When pruning is enabled we retain only user + assistant summaries,
-        # while omitting raw tool messages to reduce token churn.
-        # combined_messages = select_context_messages(
-        #     messages,
-        #     self.prune_intermediate_task_contexts,
-        # )
-        # context_length = len(combined_messages)
-        
-        # # Inject execution_id context into the latest user message only (for LLM only, not stored)
-        # combined_messages = inject_execution_id_context(combined_messages, exec_context)
-        
-        # # Calculate actual input size (character count)
-        # input_length = sum(len(str(msg.get('content', ''))) for msg in combined_messages)
-        # print(f"📊 Context: {context_length} messages, {input_length} chars sent to LLM")
-        
+                
 
         tmp = ""
-        assistant_answer  = ""
-        structured_messages: List[Dict] = []
+        assistant_response  = ""
+        structure_responses: List[Dict] = []
         try:
-            for response in self.agent.run(messages=session["messages"]):
+            for response in self.agent.run(messages=messages):
                 tmp = typewriter_print(response, tmp) # for visual purposes 
 
-            assistant_answer = response[-1]['content']
-            structured_messages = response    
-            # print(f"final text message after every inference call {structured_messages}")
-            # print(f"final structured message after every inference call {structured_messages}")
+            structure_responses = response 
+            print(structure_responses)
+            assistant_response = response[-1]['content']
         except Exception as e:
-            assistant_answer = f"Error: {str(e)}"
+            assistant_response = f"Error: {str(e)}"
 
-        # Determine if tools called have response.
-        runtime_tool_evidence,unverified_function_calls  = has_runtime_tool_evidence(structured_messages)
-        if runtime_tool_evidence:
+        # Determine if tools called have response, record tool execcution details for evaluations
+        tool_execs  = process_tool_executions(
+            session_id = session_id,
+            workflow_id = str(uuid.uuid4()),
+            response_messages = structure_responses
+        )
+
+        if tool_execs.all_tools_verified:
             print("All tool calls verified!")
+            print(tool_execs)
+            tool_execs.record_workflow_state()
         else:
-            assistant_answer = f"Unverified Tool Calls Found!"
+            assistant_response = f"Unverified Tool Calls Found!"
 
-        # Sanitize model-fabricated tool transcript tags only when no verified evidence exists.
-        # response_text = sanitize_faux_tool_transcript(
-        #     response_text,
-        #     structured_messages,
-        #     runtime_tool_evidence=runtime_tool_evidence,
-        # )
+        # Add assistant responses to history
+        if structure_responses:
+            session.messages.extend(structure_responses[-1:]) #final answer only
 
-        # Mark SUCCESS only when runtime evidence exists and execution_id appears
-        # in structured tool/runtime messages.
-        # execution_id_present = tool_messages_contain_execution_id(structured_messages, execution_id)
-        # if runtime_tool_evidence and execution_id_present:
-        #     self.execution_cache[execution_id] = "SUCCESS"
-        #     print(f"✅ Execution {execution_id} marked SUCCESS (verified tool event)")
-        # else:
-        #     self.execution_cache[execution_id] = "FAILED"
-        #     print(f"❌ Execution {execution_id} marked FAILED (no verified tool event)")
 
-        # Verify execution_ids before adding to history (sanitization point)
-        # TODO REDIS Cache
-        # verified_response, unverified_ids = verify_and_sanitize_execution_ids(
-        #     response_text,
-        #     self.execution_cache,
-        # )
-        # if unverified_ids:
-        #     print(f"⚠️  Unverified execution IDs: {unverified_ids}")
-        # if verified_response != response_text:
-        #     print(f"⚠️  Filtered unverified execution IDs from response")
-        #     response_text = verified_response
-
-        # Add assistant/tool responses to history
-        if structured_messages:
-            session["messages"].extend(structured_messages[-1:])
-
-        # Memory pruning: keep full history up to current user turn + final assistant summary.
-        # if self.prune_intermediate_task_contexts:
-        #     print("Pruning intermediate memory. Keeping only user turn and final response...")
-        #     session["messages"] = prune_session_history(
-        #         session_messages=session["messages"],
-        #         user_index_flag=user_index_flag,
-        #         structured_messages=structured_messages,
-        #         response_text=response_text,
-        #         compact_response_text=compact_response_text,
-        #     )
-
-        print(f"✅ After agent response: {len(session['messages'])} total messages in session")
-        
-        session["last_updated"] = datetime.utcnow().isoformat()
-        
-        return assistant_answer, self.compute_context_length(session["messages"]), 0
+        print(f"✅ After agent response: {len(session.messages)} total messages in session")
+        updated_session =  await self.memory_client.put_working_memory(
+            session_id = session_id,
+            memory = session,
+        )
+        return assistant_response, self.compute_context_length(updated_session.messages), 0
     
     def get_health_status(self) -> Dict:
         """Get backend health status."""
-        cache_stats = {
-            "total": len(self.execution_cache),
-            "in_progress": sum(1 for v in self.execution_cache.values() if v == "IN_PROGRESS"),
-            "success": sum(1 for v in self.execution_cache.values() if v == "SUCCESS"),
-            "failed": sum(1 for v in self.execution_cache.values() if v == "FAILED"),
-        }
+        # cache_stats = {
+        #     "total": len(self.execution_cache),
+        #     "in_progress": sum(1 for v in self.execution_cache.values() if v == "IN_PROGRESS"),
+        #     "success": sum(1 for v in self.execution_cache.values() if v == "SUCCESS"),
+        #     "failed": sum(1 for v in self.execution_cache.values() if v == "FAILED"),
+        # }
         return {
             "status": "healthy",
             "mcp_tools_loaded": self.mcp_tools_count,
             "sessions_active": len(self.sessions),
-            "execution_cache": cache_stats,
+            # "execution_cache": cache_stats,
             "backend_version": "1.0.0",
         }

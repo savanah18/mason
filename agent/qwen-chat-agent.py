@@ -97,7 +97,7 @@ async def create_session():
     if not backend:
         raise HTTPException(status_code=503, detail="Backend not initialized")
     
-    session_id = backend.create_session()
+    session_id = await backend.create_session()
     return {"session_id": session_id}
 
 
@@ -108,17 +108,17 @@ async def send_message(request: ChatRequest):
         raise HTTPException(status_code=503, detail="Backend not initialized")
     
     # Create session if not provided
-    session_id = request.session_id or backend.create_session()
+    session_id = request.session_id or await backend.create_session()
     
-    session = backend.get_session(session_id)
+    _, session = await backend.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     
     try:
-        response, context_len, input_len = backend.send_message(session_id, request.message)
+        response, context_len, input_len = await backend.send_message(session_id, request.message)
         # Re-fetch session to ensure we have latest state
-        session = backend.get_session(session_id)
-        total_msgs = len(session["messages"])
+        _, session = await backend.get_session(session_id)
+        total_msgs = len(session.messages)
         print(f"📤 Returning: context={context_len}, history={total_msgs}, input={input_len} chars")
         return ChatResponse(
             session_id=session_id,
@@ -140,14 +140,14 @@ async def get_history(session_id: str):
     if not backend:
         raise HTTPException(status_code=503, detail="Backend not initialized")
     
-    session = backend.get_session(session_id)
+    _, session = await backend.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     
     return ChatHistory(
         session_id=session_id,
-        messages=[ChatMessage(**msg) for msg in session["messages"]],
-        created_at=session["created_at"]
+        messages=[ChatMessage(**msg) for msg in session.messages],
+        created_at=session.created_at
     )
 
 

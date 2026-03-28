@@ -139,7 +139,7 @@ services:
       - triton-ai-network
     depends_on:
       kafka-server:
-        condition: service_healthy
+        condition: service_started
       # main-tensorrt-llm-server:
       #   condition: service_healthy
       kubernetes-mcp-server:
@@ -256,8 +256,8 @@ services:
     image: apache/kafka:4.2.0
     container_name: kafka-init
     volumes: 
-     - ./agent/memory/episodic/kafka/data:/tmp/kraft-combined-logs:rw
-     - ./agent/memory/episodic/kafka/config:/opt/kafka/config:rw
+     - ./agent/memory/store/episodic/kafka/data:/tmp/kraft-combined-logs:rw
+     - ./agent/memory/store/episodic/kafka/config:/opt/kafka/config:rw
     environment:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-server:9092
     command: >
@@ -270,8 +270,8 @@ services:
     image: apache/kafka:4.2.0
     container_name: kafka
     volumes: 
-     - ./agent/memory/episodic/kafka/data:/tmp/kraft-combined-logs:rw
-     - ./agent/memory/episodic/kafka/config:/opt/kafka/config:rw
+     - ./agent/memory/store/episodic/kafka/data:/tmp/kraft-combined-logs:rw
+     - ./agent/memory/store/episodic/kafka/config:/opt/kafka/config:rw
     ports:
       - "9092:9092"
     environment:
@@ -300,7 +300,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - ./agent/memory/redis/data:/data
+      - ./agent/memory/store/redis/data:/data
     environment:
       - REDIS_ARGS=--appendonly yes
     healthcheck:
