@@ -10,9 +10,11 @@ import redis
 from ..mixins.json import FromJsonMixin
 
 @dataclass
-class ToolExecutions():
+class WorkflowExecution():
     session_id: str = None
     workflow_id: str = None
+    task: str = ""
+    result: str = ""
     function_calls: List = field(default_factory=list)
     function_executions: List = field(default_factory=list)
     all_tools_verified: bool = False
@@ -45,6 +47,8 @@ class ToolExecutions():
                 mapping={
                     "session_id": str(self.session_id),
                     "workflow_id": str(self.workflow_id),
+                    "task": str(self.task),
+                    "result": str(self.result),
                     "function_calls": json.dumps(self.function_calls),
                     "function_executions": json.dumps(self.function_executions),
                     "stats": json.dumps({
@@ -65,18 +69,19 @@ def verify_execution_status(exec_id, llm_result):
     runtime_result = json.loads(record["result"])
     return runtime_result == llm_result
 
-#  process_tool_executions
-def process_tool_executions(session_id, workflow_id, response_messages: List[Dict]) -> ToolExecutions:
-    tool_execs: ToolExecutions = ToolExecutions(
+#  process_workflow_execution
+def process_workflow_execution(session_id, workflow_id, task="",  response_messages: List[Dict] = []) -> WorkflowExecution:
+    workflow_exec: WorkflowExecution = WorkflowExecution(
         session_id = session_id,
-        workflow_id = workflow_id
+        workflow_id = workflow_id,
+        task = task
     )
     function_called = set()
     num_function_calls = 0
     for message in response_messages:
         if message.get('role') == "assistant" and 'function_id' in message.get('extra'):
             function_called.add(message.get('extra').get('function_id'))
-            tool_execs.function_calls.append(message)
+            workflow_exec.function_calls.append(message)
             num_function_calls +=1
         if message.get('role') == "function" and 'function_id' in message.get('extra'):
             content = json.loads(message.get('content'))
@@ -85,14 +90,15 @@ def process_tool_executions(session_id, workflow_id, response_messages: List[Dic
                 # for built-in, we attest.
                 if verify_execution_status(exec_id, content):
                     function_called.remove(message.get('extra').get('function_id'))
-                    tool_execs.function_executions.append(message)
+                    workflow_exec.function_executions.append(message)
             else:
                 # for non built-in we trust.
                 function_called.remove(message.get('extra').get('function_id'))
-                tool_execs.function_executions.append(message)
+                workflow_exec.function_executions.append(message)
     
-    tool_execs.all_tools_verified = not(function_called)
-    return tool_execs
+    workflow_exec.result = response_messages[-1].get('content','')
+    workflow_exec.all_tools_verified = not(function_called)
+    return workflow_exec
 
 
 def sanitize_faux_tool_transcript(

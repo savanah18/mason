@@ -38,7 +38,7 @@ spec:
 
   playbook: |
     ** Playbook **
-    1. Assume package is deployed in OCI registry and you have access to it. You do not always have to perform helm repo add or helm repo update
+    1. Assume package is stored in OCI registry and you have access to it. You do not always have to perform helm repo add or helm repo update
     2. Perform Helm Validation by using the `helm template` command to render the Helm chart and check for any errors in the templates. This will help ensure that the Helm chart is correctly structured and can be deployed successfully.
     3. Double check existing deployments in the cluster to see if the package is already deployed. If it is, check the version and decide whether to perform an update or skip deployment.
     4. If the package is valid and not already deployed, proceed with the deployment using the `helm install` command. If an update is needed, use the `helm upgrade` command.

@@ -1,10 +1,13 @@
-from typing import List, Any
 import time
+import yaml
+from typing import List, Any
 
-from .sensor import Sensor
+from .sensor import Sensor, KafkaEventListener
+from templates.config.goals import GoalConfig, Goal
+from templates.config.kafka import KafkaEventListenerConfig
 from ..config.goals import Goal
 
-class BaseAgent:
+class AutonomousAgent:
     def __init__(self, 
         goal: Goal,
         sensors: List[Sensor],
@@ -36,8 +39,22 @@ class BaseAgent:
     def reason(self, percepts=[]):
         pass
 
-    def launch(self):
+    async def launch(self):
         while(not self.is_terminated):
             percepts =  [next(percept) for percept in self.perceive()] 
-            self.reason(percepts)
-            time.sleep(1)
+            await self.reason(percepts)
+
+    def _initialize_sensors(self, config_path) -> List[Sensor]:
+        with open(config_path, "r") as f: 
+            data = yaml.safe_load(f)
+            sensors = [
+                globals()[sensor['type']](config=globals()[sensor['config_type']].from_json(sensor))
+                for sensor in data['spec']
+            ]
+            return sensors
+
+    def _initialize_goal(self, config_path) -> Goal:
+        with open(config_path, "r") as f: 
+            data = yaml.safe_load(f)
+            goal = Goal(config=GoalConfig.from_json(data['spec']))
+            return goal

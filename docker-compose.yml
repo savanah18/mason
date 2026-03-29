@@ -40,7 +40,7 @@ services:
   # LLM 
   ## Development Server for TensorRT-LLM
   main-tensorrt-llm-server:
-    profiles: ["serving", "final"]
+    profiles: ["serving", "standard"]
     image: nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc5
     container_name: main-tensorrt-llm-server
     volumes:
@@ -111,13 +111,14 @@ services:
 
   # Agents
   deployer-agent:
-    profiles: ["agent", "final"]
+    profiles: ["agent", "standard"]
     build:
       context: ./agent/
       dockerfile: ./Dockerfile.agents
       additional_contexts:
         templates: ./agent/templates
         actions: ./agent/actions
+        memory: ./agent/memory
     image: agent-generic:latest
     container_name: deployer-agent
     secrets: 
@@ -132,6 +133,8 @@ services:
     - ./agent/personas:/app/personas:rw
     - ./agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw # for dev purposes only
     - ./agent/templates:/app/templates:rw
+    - ./agent/actions/:/app/actions:rw
+    - ./agent/memory/:/app/memory:rw
     - /root/workspace/lnd/aiops/vlm/Qwen/Qwen3-4B-Instruct-2507:/mnt/checkpoint:ro
     command: >
       python -u qwen-ops-agent.py 
@@ -144,16 +147,10 @@ services:
       #   condition: service_healthy
       kubernetes-mcp-server:
         condition: service_healthy
-    restart: unless-stopped
+    # restart: unless-stopped
 
   resiliency-optimizer-agent:
-    profiles: ["agent", "final"]
-    build:
-      context: ./agent/
-      dockerfile: ./Dockerfile.agents
-      additional_contexts:
-        templates: ./agent/templates
-        actions: ./agent/actions
+    profiles: ["agent", "standard"]
     image: agent-generic:latest
     container_name: resiliency-optimizer-agent
     secrets: 
@@ -169,6 +166,8 @@ services:
     - ./agent/personas:/app/personas:rw
     - ./agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw # for dev purposes only
     - ./agent/templates:/app/templates:rw
+    - ./agent/actions/:/app/actions:rw
+    - ./agent/memory/:/app/memory:rw
     - /root/workspace/lnd/aiops/vlm/Qwen/Qwen3-4B-Instruct-2507:/mnt/checkpoint:ro
     command: >
       python -u qwen-ops-agent.py 
@@ -181,16 +180,10 @@ services:
       #   condition: service_healthy
       kubernetes-mcp-server:
         condition: service_healthy
-    restart: unless-stopped
+    # restart: unless-stopped
 
   chat-agent:
-    profiles: ["agent", "final"]
-    build:
-      context: ./agent/
-      dockerfile: ./Dockerfile.agents
-      additional_contexts:
-        templates: ./agent/templates
-        actions: ./agent/actions
+    profiles: ["agent", "standard"]
     image: agent-generic:latest
     container_name: chat-agent
     secrets: 
@@ -206,6 +199,7 @@ services:
     - ./agent/qwen-chat-agent.py:/app/qwen-chat-agent.py:rw # for dev purposes only
     - ./agent/templates:/app/templates:rw
     - ./agent/actions/:/app/actions:rw
+    - ./agent/memory/:/app/memory:rw
     - /root/workspace/lnd/aiops/vlm/Qwen/Qwen3-4B-Instruct-2507:/mnt/checkpoint:ro
     command: >
       python -u qwen-chat-agent.py 
@@ -223,7 +217,7 @@ services:
 
   # MCP and other tools
   kubernetes-mcp-server:
-    profiles: ["tools", "final"]
+    profiles: ["tools", "standard"]
     image: agent-generic:latest
     container_name: kubernetes-mcp-server
     secrets: 
@@ -266,7 +260,7 @@ services:
       - triton-ai-network
 
   kafka-server:
-    profiles: ["tools", "final"]
+    profiles: ["tools", "standard"]
     image: apache/kafka:4.2.0
     container_name: kafka
     volumes: 
@@ -294,7 +288,7 @@ services:
 
   ## Memory Management
   redis:
-    profiles: ["memory", "final"]
+    profiles: ["memory", "standard"]
     image: redis/redis-stack-server:latest
     container_name: redis
     ports:
@@ -316,7 +310,7 @@ services:
       - triton-ai-network
 
   agent-memory-server-api:
-    profiles: ["memory", "final"]
+    profiles: ["memory", "standard"]
     image: redislabs/agent-memory-server:latest
     container_name: agent-memory-server-api
     ports:
