@@ -16,13 +16,13 @@ class MemoryManagementMixin:
         )
         return MemoryAPIClient(memory_client_config)
 
-    async def create_session(self) -> str:
+    async def create_session(self, user_id = None) -> str:
         """Create a new chat session."""
         session_id = str(uuid.uuid4())
         print("Sessions: ", self.sessions)
         await self.memory_client.get_or_create_working_memory(
             session_id = session_id,
-            user_id = self.__class__.__name__
+            user_id = user_id or self.__class__.__name__
         )
         self.sessions[session_id] =  {}
         
@@ -32,8 +32,7 @@ class MemoryManagementMixin:
     async def get_session(self, session_id: str) -> tuple[bool, WorkingMemory]:
         """Get session by ID."""
         created, session = await self.memory_client.get_or_create_working_memory(
-            session_id = session_id,
-            user_id = self.__class__.__name__,
+            session_id = session_id
         )
         return created, session
     

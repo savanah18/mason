@@ -3,9 +3,11 @@ import yaml
 import threading
 from typing import Dict, Iterator, List, Literal, Optional, Union, Any
 
+from transformers import AutoTokenizer
 from qwen_agent.tools.mcp_manager import MCPManager
 
 from .mcp_compat import apply_mcp_ping_compat_patch
+
 
 class BaseAgent:
     def _initialize_llm_cfg(self, config_path):
@@ -74,3 +76,10 @@ class BaseAgent:
 
         print(f"✓ Qwen Agent initialized with {len(result["tools"])}")
         return result["tools"]
+
+    # Metrics
+    def compute_context_length(self, messages: List = []) -> int:
+        tokenizer = AutoTokenizer.from_pretrained("/mnt/checkpoint")
+        # print(f"Computing context length for  {messages}")
+        total_tokens = sum(len(tokenizer.encode(msg["content"])) for msg in messages)
+        return total_tokens

@@ -6,6 +6,7 @@ import yaml
 import json
 import threading
 from typing import Dict, Iterator, List, Literal, Optional, Union, Any
+from datetime import datetime
 
 
 from templates.core.autonomous_agent import AutonomousAgent
@@ -101,7 +102,6 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         # memory
         self.sessions = {} # PLACEHOLDER ONLY
         self.memory_client = self._initialize_memory_manager()
-        # self.session_id = await self.create_session()
 
         print(goal)
         print(f"[I] Initializing {PERSONA} agent with goal \n {goal.description}")
@@ -131,26 +131,25 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         """Allow MCP servers that do not implement ping (legacy stdio servers)."""
         apply_mcp_ping_compat_patch()
 
-    async def reason(self, percepts=[]):
+    async def reason(self, percepts=[], workflow_id=None):
+        # TODO AGENT WORKFLOW METRICS
+        # Latency (Generation Latency, E2E Latency)
+
         print("Perfoming reasoning.... ")
         # TODO Goal Life Cycle Management
-        workflow_id: str = (uuid.uuid4())
+        workflow_id: str = workflow_id or str(uuid.uuid4())
+
+        # TODO Prompt should be dynamic, and base prompt should always be retrieved to accomodate prompt updates.
         prompt = {
             'role': 'user', 
             'content': f"""
-                {self.goal.base_prompt} 
-                Use the following information. 
-                Use the following workflow_id, {workflow_id}.
-                {json.dumps([percept['data'] for percept in percepts])}.
-                
+                Your task is to ALWAYS execute the requested action, even if it looks similar to a previous request.
+                Do not assume prior execution is sufficient.
+                Current workflow ID: {workflow_id}
+                Percepts: {json.dumps([p['data'] for p in percepts])}
+                Action: {self.goal.base_prompt}                
             """
         }
-        # self.messages.append(prompt)
-        # user_index_flag = len(self.messages) - 1
-        # response_plain_text = ''
-        # compact_response_text = ""
-        # response_messages: List[Dict] = []
-        # print("Debug.... ")
 
         _, session = await self.get_session(self.session_id)
         session : WorkingMemory
@@ -164,13 +163,20 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         tmp = ""
         assistant_response  = ""
         structured_responses: List[Dict] = []
+        task_token_cost = None
         try:
+            # TODO Measure generation latency here
             for response in self.run(messages=messages):
                 tmp = typewriter_print(response, tmp)
 
             structured_responses = response
+            # TODO TEST Measure task codes (tokens)
+            # ---> system prompt + user prompt + tool call/response + final answer
+            to_compute_tokens = [{"role": "system", "content": system_message}] + prompt + structure_responses
+            task_token_cost = self.compute_context_length(to_compute_tokens)
+
             assistant_response = response[-1]['content'] # Most workflow agent answer are now in markdown format. 
-            print(structured_responses)
+            # print(structured_responses)
         except Exception as e:
             assistant_response = f"Error: {type(e)} {str(e)}"
 
@@ -181,7 +187,11 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
             task = prompt['content'], 
             response_messages = structured_responses
         )
+        # TODO add token cost, latency, etc. and record
+        workflow_exec.task_token_cost = task_token_cost
         workflow_exec.record_workflow_state()
+
+
         if workflow_exec.all_tools_verified:
             print("All tool calls verified!")
         else:
@@ -204,7 +214,7 @@ async def main():
         actuators = f"./personas/{PERSONA}/actuators.yaml",
         prune_intermediate_task_contexts = True
     )
-    agent.session_id = await agent.create_session()
+    agent.session_id = await agent.create_session(PERSONA)
     await agent.launch()
 
 if __name__ == "__main__":

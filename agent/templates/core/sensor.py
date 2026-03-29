@@ -40,6 +40,7 @@ class KafkaEventListener(Sensor):
         self.consumer = KafkaConsumer(**config)
         # regex based subscription
         pattern = "(" + "|".join(topics) + ")"
+        print(f"Listenting from {pattern}")
         self.consumer.subscribe(pattern = re.compile(pattern))
 
     def acquire_percepts(self):

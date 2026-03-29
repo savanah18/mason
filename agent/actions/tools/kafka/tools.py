@@ -63,6 +63,8 @@ class KafkaProduceMessage(MemoryTraceableTool):
     ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
+        exec_id = None
+        args = {}
         try:
             args = _parse_params(params)
             exec_id = self._pre_call(self.tool_name, args)

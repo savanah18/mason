@@ -18,6 +18,9 @@ class WorkflowExecution():
     function_calls: List = field(default_factory=list)
     function_executions: List = field(default_factory=list)
     all_tools_verified: bool = False
+    workflow_latency: float = None
+    model_generation_latency: float = None
+    task_token_cost: int = None
 
     def num_function_calls(self):
         return len(self.function_calls)
@@ -56,6 +59,9 @@ class WorkflowExecution():
                         "num_function_execs": self.num_function_execs(),
                         "execution_success_rate": self.execution_success_rate(),
                         "execution_failure_rate": self.execution_failure_rate(),
+                        "workflow_latency": self.workflow_latency,
+                        "model_generation_latency": self.model_generation_latency,
+                        "task_token_cost": self.task_token_cost,
                     })
                 }
             )
@@ -69,8 +75,22 @@ def verify_execution_status(exec_id, llm_result):
     runtime_result = json.loads(record["result"])
     return runtime_result == llm_result
 
+def extract_exec_id(message) -> bool:
+    try:
+        # Try checking if function call is traceable
+        content = json.loads(message.get('content'))
+        exec_id = content.get('exec_id', None)
+        return exec_id
+    except Exception as e:
+        return None
+
 #  process_workflow_execution
-def process_workflow_execution(session_id, workflow_id, task="",  response_messages: List[Dict] = []) -> WorkflowExecution:
+def process_workflow_execution(
+    session_id, 
+    workflow_id, 
+    task="",  
+    response_messages: List[Dict] = []
+) -> WorkflowExecution:
     workflow_exec: WorkflowExecution = WorkflowExecution(
         session_id = session_id,
         workflow_id = workflow_id,
@@ -79,15 +99,17 @@ def process_workflow_execution(session_id, workflow_id, task="",  response_messa
     function_called = set()
     num_function_calls = 0
     for message in response_messages:
-        if message.get('role') == "assistant" and 'function_id' in message.get('extra'):
-            function_called.add(message.get('extra').get('function_id'))
-            workflow_exec.function_calls.append(message)
-            num_function_calls +=1
+        if message.get('role') == "assistant": 
+            # print(message.get('content'))
+            if 'function_id' in message.get('extra'):
+                function_called.add(message.get('extra').get('function_id'))
+                workflow_exec.function_calls.append(message)
+                num_function_calls +=1
         if message.get('role') == "function" and 'function_id' in message.get('extra'):
-            content = json.loads(message.get('content'))
-            exec_id = content.get('exec_id')
+            exec_id = extract_exec_id(message) # check if tool is traceable
             if exec_id:
                 # for built-in, we attest.
+                content = json.loads(message.get('content'))
                 if verify_execution_status(exec_id, content):
                     function_called.remove(message.get('extra').get('function_id'))
                     workflow_exec.function_executions.append(message)

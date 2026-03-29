@@ -71,6 +71,7 @@ spec:
 
     5. **Output**
     - Provide a summary report including timestamps, metrics, recommendations, and applied patches. 
+    - Always provide reference to workflow id summary report for easier traceability.
 
     6. **Introspection**
     - Reflect on the actions done tool success and failures.
