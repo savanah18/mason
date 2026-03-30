@@ -78,8 +78,9 @@ class BaseAgent:
         return result["tools"]
 
     # Metrics
-    def compute_context_length(self, messages: List = []) -> int:
+    def compute_total_tokens(self, messages: List = []) -> int:
         tokenizer = AutoTokenizer.from_pretrained("/mnt/checkpoint")
         # print(f"Computing context length for  {messages}")
         total_tokens = sum(len(tokenizer.encode(msg["content"])) for msg in messages)
+        print("Total tokens:\t ", total_tokens)
         return total_tokens

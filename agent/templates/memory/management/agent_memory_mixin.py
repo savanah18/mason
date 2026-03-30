@@ -14,6 +14,7 @@ class MemoryManagementMixin:
             base_url = os.getenv("AGENT_MEMORY_SERVER_URL", "http://agent-memory-server-api:8000"),
             default_namespace = "chat"
         )
+        print(f"Initializing agent memory client with config \n {memory_client_config}")
         return MemoryAPIClient(memory_client_config)
 
     async def create_session(self, user_id = None) -> str:

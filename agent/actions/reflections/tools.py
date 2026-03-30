@@ -9,35 +9,26 @@ from qwen_agent.tools.base import BaseTool, register_tool
 # Prompt Update Tools
 # ============================================================================
 
-@register_tool('update-base-prompt')
-class OptimizerUpdatePrompt(BaseTool):
+class ReflectivePromptOptimzer():
+    def __init__(self, goal_config_path):
+        self.config_path = config_path
+
+    def update_user_prompt_template():
+        pass
+
     
-    description = 'Update current agent base prompt.'
+
+@register_tool('update-user-prompt')
+class OptimizerUpdateUserPromptTemplate(BaseTool):
+    
+    description = 'Update current agent user prompt template.'
     parameters = [
         {
-            'name': 'repo_name',
+            'name': 'updated prompt',
             'type': 'string',
-            'description': 'Name for the repository (e.g., "stable", "bitnami")',
+            'description': 'Updated prompt',
             'required': True
         },
-        {
-            'name': 'repo_url',
-            'type': 'string',
-            'description': 'Repository URL (e.g., "https://charts.bitnami.com/bitnami")',
-            'required': True
-        },
-        {
-            'name': 'username',
-            'type': 'string',
-            'description': 'Optional: Username for authentication',
-            'required': False
-        },
-        {
-            'name': 'password',
-            'type': 'string',
-            'description': 'Optional: Password for authentication',
-            'required': False
-        }
     ]
 
     def call(self, params: str, **kwargs) -> str:

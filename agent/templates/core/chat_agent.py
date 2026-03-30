@@ -110,7 +110,7 @@ class ChatAgentBackend(BaseAgent, MemoryManagementMixin):
         if not session:
             raise ValueError(f"Session {session_id} not found")
         
-        
+        print("User message: ", user_message)
         # Add user message to history
         session.messages.append({"role": "user", "content": user_message})
         messages = [m.dict() if type(m)!=dict else m for m in session.messages]

@@ -20,7 +20,8 @@ class WorkflowExecution():
     all_tools_verified: bool = False
     workflow_latency: float = None
     model_generation_latency: float = None
-    task_token_cost: int = None
+    task_total_token_cost: int = None
+    task_gen_token_cost: int = None
 
     def num_function_calls(self):
         return len(self.function_calls)
@@ -61,7 +62,8 @@ class WorkflowExecution():
                         "execution_failure_rate": self.execution_failure_rate(),
                         "workflow_latency": self.workflow_latency,
                         "model_generation_latency": self.model_generation_latency,
-                        "task_token_cost": self.task_token_cost,
+                        "task_total_token_cost": self.task_total_token_cost,
+                        "task_gen_token_cost": self.task_gen_token_cost,
                     })
                 }
             )
@@ -100,7 +102,7 @@ def process_workflow_execution(
     num_function_calls = 0
     for message in response_messages:
         if message.get('role') == "assistant": 
-            # print(message.get('content'))
+            print("DEBUG!!!!", message)
             if 'function_id' in message.get('extra'):
                 function_called.add(message.get('extra').get('function_id'))
                 workflow_exec.function_calls.append(message)
@@ -118,6 +120,7 @@ def process_workflow_execution(
                 function_called.remove(message.get('extra').get('function_id'))
                 workflow_exec.function_executions.append(message)
     
+    print("len(response_messages)", len(response_messages))
     workflow_exec.result = response_messages[-1].get('content','')
     workflow_exec.all_tools_verified = not(function_called)
     return workflow_exec

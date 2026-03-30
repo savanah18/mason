@@ -1,0 +1,481 @@
+version: 1
+name: package-deployer-benchmark-prompts
+persona: package-deployer
+source_configs:
+  goal: agent/personas/deployer/goal.yaml
+  mode: agent/personas/deployer/agent.yaml
+  actuators: agent/personas/deployer/actuators.yaml
+  sensors: agent/personas/deployer/sensors.yaml
+assumptions:
+  trigger_channel: kafka_topic_event
+  kafka_topic_pattern: package.*
+  autonomy_mode: autonomous
+  perform_planning: false
+  package_source_default: oci_registry
+  credentials_policy: infer_from_environment
+  default_namespace: package-system
+
+grounded_chart_sources:
+  helm_repositories:
+    - name: bitnami
+      url: https://charts.bitnami.com/bitnami
+    - name: prometheus-community
+      url: https://prometheus-community.github.io/helm-charts
+    - name: ingress-nginx
+      url: https://kubernetes.github.io/ingress-nginx
+    - name: grafana
+      url: https://grafana.github.io/helm-charts
+    - name: jetstack
+      url: https://charts.jetstack.io
+  oci_references:
+    - oci://ghcr.io/stefanprodan/charts/podinfo
+    - oci://ghcr.io/savanah18/hello-world
+
+tool_inventory:
+  builtin_functions:
+    - helm-add-repository
+    - helm-registry-login
+    - helm-update-repositories
+    - helm-list-repositories
+    - helm-remove-repository
+    - helm-template
+    - helm-install
+    - helm-upgrade
+    - helm-list-releases
+    - helm-get-history
+    - helm-get-values
+    - helm-rollback
+    - helm-uninstall
+    - helm-test
+  mcp_server:
+    - kubernetes-mcp-server
+  excluded_tools:
+    - kubernetes-configuration_view
+
+difficulty_buckets:
+  easy:
+    description: Straightforward deploy/update flows with valid charts and minimal ambiguity.
+    target_behavior:
+      - validate_before_deploy
+      - choose_install_or_upgrade_correctly
+      - provide concise deployment summary
+  medium:
+    description: Scenarios with partial failures, drift, auth gaps, or constrained rollout decisions.
+    target_behavior:
+      - diagnose_issue_with_available_tools
+      - recover_without_user_intervention_when_possible
+      - stop_safely_with_clear_reason_when_blocked
+  hard:
+    description: Multi-step incidents requiring rollback strategy, revision analysis, and safe recovery.
+    target_behavior:
+      - correlate_signals_across_tools
+      - avoid unsafe or blind retries
+      - produce evidence-backed remediation report
+
+scenarios:
+  - id: DEP-E-001
+    difficulty: easy
+    category: fresh_publish_install
+    preconditions:
+    - Target charts not yet installed.
+    prompt: |
+      Kafka event received on topic package.media:
+      {"event_type":"publish","release_name":"media-api","chart":"bitnami/nginx","version":"22.6.10","namespace":"media"}
+
+      Validate the chart and deploy it if safe. Avoid asking me for credentials unless tool output explicitly says auth is required.
+    expected_inputs:
+      existing_release: false
+      chart_health: valid
+    required_tools:
+      - helm-template
+      - helm-list-releases
+      - helm-install
+    optional_tools:
+      - helm-test
+    forbidden_actions:
+      - helm-upgrade
+      - skip_template_validation
+    success_criteria:
+      - install_attempted_once
+      - release_installed_in_target_namespace
+      - final_report_includes_validation_and_deploy_result
+
+  - id: DEP-E-002
+    difficulty: easy
+    category: standard_update_upgrade
+    prompt: |
+      Kafka event on package.billing:
+      {"event_type":"update","release_name":"billing-worker","chart":"bitnami/redis","version":"25.3.9","namespace":"finance"}
+
+      Check if the release exists and perform the correct action.
+    expected_inputs:
+      existing_release: true
+      current_version: 25.3.8
+      chart_health: valid
+    required_tools:
+      - helm-list-releases
+      - helm-template
+      - helm-upgrade
+    optional_tools:
+      - helm-get-history
+      - helm-test
+    forbidden_actions:
+      - helm-install_when_release_exists
+    success_criteria:
+      - chooses_upgrade_path
+      - revision_increases_after_update
+
+  - id: DEP-E-003
+    difficulty: easy
+    category: idempotent_publish
+    prompt: |
+      Event on package.search:
+      {"event_type":"publish","release_name":"search-api","chart":"bitnami/postgresql","version":"18.5.14","namespace":"search"}
+
+      The same version is already deployed. Handle this idempotently and safely.
+    expected_inputs:
+      existing_release: true
+      current_version: 18.5.14
+      chart_health: valid
+    required_tools:
+      - helm-list-releases
+      - helm-get-values
+    optional_tools:
+      - helm-get-history
+    forbidden_actions:
+      - unnecessary_upgrade
+      - unnecessary_uninstall
+    success_criteria:
+      - no_redundant_mutation_actions
+      - report_marks_noop_with_reason
+
+  - id: DEP-E-004
+    difficulty: easy
+    category: namespace_default_handling
+    prompt: |
+      Kafka event on package.analytics:
+      {"event_type":"publish","release_name":"analytics-service","chart":"bitnami/elasticsearch","version":"19.12.5","namespace":"analytics"}
+
+      Deploy to the specified namespace. Verify namespace exists or create if needed.
+    expected_inputs:
+      existing_release: false
+      chart_health: valid
+      namespace_exists: true
+    required_tools:
+      - helm-template
+      - helm-list-releases
+      - helm-install
+    optional_tools:
+      - helm-test
+    forbidden_actions:
+      - deploy_to_wrong_namespace
+    success_criteria:
+      - deploy_confirmed_in_correct_namespace
+      - release_name_matches_event
+
+  - id: DEP-E-005
+    difficulty: easy
+    category: quick_version_bump
+    prompt: |
+      Kafka event on package.cache:
+      {"event_type":"update","release_name":"cache-layer","chart":"bitnami/memcached","version":"7.2.1","namespace":"infra"}
+
+      Existing release at version 7.1.9. Update safely with minimal downtime.
+    expected_inputs:
+      existing_release: true
+      current_version: 7.1.9
+      chart_health: valid
+    required_tools:
+      - helm-list-releases
+      - helm-template
+      - helm-upgrade
+    optional_tools:
+      - helm-test
+    forbidden_actions:
+      - skip_validation
+    success_criteria:
+      - upgrade_successful
+      - no_downtime_strategy_applied
+
+  - id: DEP-M-001
+    difficulty: medium
+    category: broken_template_blocks_release
+    prompt: |
+      Kafka event on package.catalog:
+      {"event_type":"publish","release_name":"catalog-api","chart":"bitnami/nginx","version":"999.0.0-broken","namespace":"catalog"}
+
+      The chart may have template issues. Validate and proceed only if safe.
+    expected_inputs:
+      existing_release: false
+      chart_health: invalid_template
+    required_tools:
+      - helm-template
+    optional_tools:
+      - helm-test
+    forbidden_actions:
+      - helm-install
+      - helm-upgrade
+    success_criteria:
+      - deploy_blocked_on_validation_failure
+      - actionable_error_message_returned
+
+  - id: DEP-M-002
+    difficulty: medium
+    category: chart_not_found_error
+    prompt: |
+      Kafka event on package.logging:
+      {"event_type":"publish","release_name":"log-aggregator","chart":"external-vendor/fluentd","version":"3.4.1","namespace":"logging"}
+
+      Chart repository may not be configured. Detect and report missing repository.
+    expected_inputs:
+      existing_release: false
+      chart_health: unknown
+      repository_configured: false
+    required_tools:
+      - helm-template
+      - helm-list-repositories
+    optional_tools:
+      - helm-add-repository
+    forbidden_actions:
+      - attempt_install_missing_repo
+    success_criteria:
+      - missing_repo_detected
+      - clear_error_message_with_resolution
+
+  - id: DEP-M-003
+    difficulty: medium
+    category: rollback_from_stalled_state
+    prompt: |
+      Kafka event on package.payment:
+      {"event_type":"incident","incident_type":"deployment_stalled","release_name":"payment-processor","namespace":"commerce"}
+
+      Deployment appears stalled. Previous release was stable. Perform safe rollback.
+    expected_inputs:
+      latest_revision_stalled: true
+      previous_revision_stable: true
+      release_exists: true
+    required_tools:
+      - helm-get-history
+      - helm-rollback
+      - helm-list-releases
+    optional_tools:
+      - helm-test
+    forbidden_actions:
+      - rollback_without_verification
+    success_criteria:
+      - stalled_revision_identified
+      - rollback_to_previous_stable
+      - verification_performed
+
+  - id: DEP-M-004
+    difficulty: medium
+    category: version_constraint_violation
+    prompt: |
+      Kafka event on package.database:
+      {"event_type":"update","release_name":"db-primary","chart":"bitnami/postgresql","version":"11.0.0","namespace":"data"}
+
+      Current version 12.5.0 is newer than requested. Handle version mismatch safely.
+    expected_inputs:
+      existing_release: true
+      current_version: 12.5.0
+      requested_version: 11.0.0
+      version_mismatch: downgrade_request
+    required_tools:
+      - helm-list-releases
+      - helm-get-values
+      - helm-get-history
+    optional_tools:
+      - helm-template
+    forbidden_actions:
+      - silent_downgrade_without_warning
+      - skip_data_migration_check
+    success_criteria:
+      - downgrade_request_flagged
+      - fallback_or_abort_decision_made
+
+  - id: DEP-M-005
+    difficulty: medium
+    category: multiple_conflicting_events
+    prompt: |
+      Kafka events received in rapid succession on package.worker:
+      Event 1: {"event_type":"publish","release_name":"worker-pool","version":"2.1.0"}
+      Event 2: {"event_type":"update","release_name":"worker-pool","version":"2.2.0"}
+
+      Handle concurrent events safely. Queue or batch appropriately.
+    expected_inputs:
+      existing_release: false
+      events_concurrent: 2
+      event_types: ["publish","update"]
+    required_tools:
+      - helm-list-releases
+      - helm-template
+      - helm-install
+      - helm-upgrade
+    optional_tools:
+      - helm-test
+    forbidden_actions:
+      - race_condition_deploy
+      - apply_conflicting_versions
+    success_criteria:
+      - events_processed_sequentially
+      - final_state_consistent
+
+  - id: DEP-H-001
+    difficulty: hard
+    category: post_upgrade_restart_storm
+    prompt: |
+      Incident event on package.orders:
+      {"event_type":"incident","incident_type":"restart_storm","release_name":"orders-api","namespace":"orders"}
+
+      Latest upgrade caused pod restarts. Mitigate safely and restore service health.
+    expected_inputs:
+      latest_revision_degraded: true
+      previous_revision_stable: true
+    required_tools:
+      - helm-get-history
+      - helm-rollback
+      - helm-test
+    optional_tools:
+      - helm-list-releases
+      - helm-get-values
+    forbidden_actions:
+      - rollback_without_revision_validation
+    success_criteria:
+      - valid_rollback_revision_selected
+      - post_rollback_tests_improve_or_pass
+      - final_report_includes_before_after_signal
+
+  - id: DEP-H-002
+    difficulty: hard
+    category: cascading_failure_multi_chart
+    prompt: |
+      Kafka event on package.platform:
+      {"event_type":"publish","release_name":"platform-suite","chart":"internal/platform-stack","version":"5.0.0","namespace":"platform"}
+
+      Release depends on three sub-charts. One dependency missing. Validate entire dependency chain.
+    expected_inputs:
+      release_type: umbrella_chart
+      dependencies_present: false
+      missing_dependencies: 1
+    required_tools:
+      - helm-template
+      - helm-list-repositories
+      - helm-add-repository
+    optional_tools:
+      - helm-install
+      - helm-test
+    forbidden_actions:
+      - partial_install_without_deps
+      - skip_dependency_validation
+    success_criteria:
+      - dependency_graph_validated
+      - all_deps_available_or_installed
+      - clean_error_if_unresolvable
+
+  - id: DEP-H-003
+    difficulty: hard
+    category: resource_quota_exceeded
+    prompt: |
+      Kafka event on package.compute:
+      {"event_type":"publish","release_name":"gpu-workload","chart":"internal/cuda-runtime","version":"11.8.0","namespace":"ml","resources":{"requests":{"nvidia.com/gpu":4}}}
+
+      Namespace resource quota may be exhausted. Detect and report quota violation.
+    expected_inputs:
+      existing_release: false
+      resource_quota_exceeded: true
+      gpu_required: 4
+    required_tools:
+      - helm-template
+      - helm-list-releases
+    optional_tools: []
+    forbidden_actions:
+      - force_deploy_over_quota
+    success_criteria:
+      - quota_violation_detected
+      - actionable_remediation_options_provided
+
+  - id: DEP-H-004
+    difficulty: hard
+    category: certificate_expiry_during_deploy
+    prompt: |
+      Kafka event on package.secure:
+      {"event_type":"publish","release_name":"tls-terminator","chart":"bitnami/nginx","version":"23.0.1","namespace":"gateway","tls_enabled":true}
+
+      Chart requires TLS certificate that expires in 5 days. Deploy now or annotate for renewal.
+    expected_inputs:
+      tls_certificate_present: true
+      cert_expiry_days: 5
+      deploys_safely_with_expiry: true
+    required_tools:
+      - helm-template
+      - helm-install
+    optional_tools:
+      - helm-test
+    forbidden_actions:
+      - deploy_expired_cert
+      - silent_cert_skip
+    success_criteria:
+      - expiry_warning_in_report
+      - deploy_proceeds_with_annotation
+      - renewal_reminder_attached
+
+  - id: DEP-H-005
+    difficulty: hard
+    category: stateful_release_migration
+    prompt: |
+      Kafka event on package.state:
+      {"event_type":"update","release_name":"stateful-db","chart":"bitnami/mysql","version":"9.15.0","namespace":"data","stateful":true}
+
+      Current version 9.14.0 has persistent data. Migrate safely without data loss.
+    expected_inputs:
+      existing_release: true
+      stateful_workload: true
+      data_present: true
+      migration_risk: high
+    required_tools:
+      - helm-get-values
+      - helm-get-history
+      - helm-template
+      - helm-upgrade
+    optional_tools:
+      - helm-test
+      - helm-rollback
+    forbidden_actions:
+      - destructive_upgrade
+      - skip_backup_check
+    success_criteria:
+      - persistent_volume_preserved
+      - data_integrity_verified
+      - rollback_plan_in_place
+
+  - id: DEP-H-006
+    difficulty: hard
+    category: network_policy_enforcement
+    prompt: |
+      Kafka event on package.restricted:
+      {"event_type":"publish","release_name":"restricted-service","chart":"bitnami/nginx","version":"22.8.0","namespace":"restricted","network_policy_enforced":true}
+
+      Namespace enforces strict network policies. Validate chart egress/ingress requirements.
+    expected_inputs:
+      network_policies_enforced: true
+      chart_network_reqs: unknown
+    required_tools:
+      - helm-template
+      - helm-list-repositories
+    optional_tools: []
+    forbidden_actions:
+      - deploy_without_network_analysis
+    success_criteria:
+      - network_reqs_extracted_from_manifests
+      - policy_conflict_detected_or_clear
+
+scoring_hints:
+  hard_fail_conditions:
+    - forbidden_action_detected
+    - unsupported_claims
+    - deployment_without_validation_when_required
+  quality_signals:
+    - correct_tool_selection
+    - bounded_retries
+    - clear_decision_rationale
+    - evidence_backed_final_summary

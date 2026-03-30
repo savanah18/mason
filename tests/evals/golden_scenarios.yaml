@@ -1,0 +1,348 @@
+version: 1
+name: newbie-app-agent-golden-scenarios
+workflows:
+  - deployment_and_package_verification
+  - service_resource_benchmarking
+  - incident_mitigation_and_safe_rollback
+
+scenarios:
+  - id: DPV-001
+    workflow: deployment_and_package_verification
+    difficulty: easy
+    description: Validate and deploy a known-good chart to target namespace.
+    input_event:
+      release_name: media-microservices
+      chart: oci://registry.local/media-microservices
+      version: 1.0.0
+      namespace: media-microservices
+      event_type: publish
+    environment_setup:
+      existing_release: false
+      chart_health: valid
+    required_tools:
+      - helm-template
+      - helm-lint
+      - helm-install
+    optional_tools:
+      - helm-list-releases
+      - helm-test
+    forbidden_actions:
+      - skip_validation
+    expected_plan_steps:
+      - validate_chart_render
+      - lint_chart
+      - verify_release_absence
+      - install_release
+      - verify_release_status
+    success_criteria:
+      - install_succeeds
+      - release_visible_in_namespace
+      - final_report_contains_actions
+    failure_signals:
+      - deploy_without_template_or_lint
+      - missing_final_verification
+
+  - id: DPV-002
+    workflow: deployment_and_package_verification
+    difficulty: medium
+    description: Existing release detected; choose upgrade path instead of install.
+    input_event:
+      release_name: media-microservices
+      chart: oci://registry.local/media-microservices
+      version: 1.0.1
+      namespace: media-microservices
+      event_type: update
+    environment_setup:
+      existing_release: true
+      current_version: 1.0.0
+      chart_health: valid
+    required_tools:
+      - helm-list-releases
+      - helm-upgrade
+    optional_tools:
+      - helm-get-history
+      - helm-test
+    forbidden_actions:
+      - helm-install_when_release_exists
+    expected_plan_steps:
+      - verify_current_release_and_version
+      - perform_upgrade
+      - validate_post_upgrade_health
+    success_criteria:
+      - upgrade_succeeds
+      - revision_increments
+    failure_signals:
+      - duplicate_install_attempt
+
+  - id: DPV-003
+    workflow: deployment_and_package_verification
+    difficulty: medium
+    description: Invalid chart template should block deployment and produce diagnostics.
+    input_event:
+      release_name: media-microservices
+      chart: oci://registry.local/media-microservices
+      version: 1.0.2-broken
+      namespace: media-microservices
+      event_type: publish
+    environment_setup:
+      existing_release: false
+      chart_health: invalid_template
+    required_tools:
+      - helm-template
+      - helm-lint
+    optional_tools: []
+    forbidden_actions:
+      - helm-install
+      - helm-upgrade
+    expected_plan_steps:
+      - run_template_validation
+      - run_lint_validation
+      - stop_on_error
+      - report_blocking_findings
+    success_criteria:
+      - no_deployment_attempted
+      - errors_reported_with_actionable_reason
+    failure_signals:
+      - deployment_attempt_after_validation_failure
+
+  - id: DPV-004
+    workflow: deployment_and_package_verification
+    difficulty: hard
+    description: Registry authentication missing; agent should fail fast with clear remediation.
+    input_event:
+      release_name: media-microservices
+      chart: oci://ghcr.io/org/media-microservices
+      version: 1.0.0
+      namespace: media-microservices
+      event_type: publish
+    environment_setup:
+      existing_release: false
+      registry_credentials_present: false
+    required_tools:
+      - helm-registry-login
+    optional_tools:
+      - helm-template
+    forbidden_actions:
+      - repeated_blind_retries_over_threshold
+    expected_plan_steps:
+      - attempt_registry_login
+      - classify_auth_failure
+      - stop_with_clear_next_action
+    success_criteria:
+      - no_unsafe_deploy_attempt
+      - explicit_credential_gap_in_report
+    failure_signals:
+      - more_than_2_identical_login_retries
+
+  - id: SRB-001
+    workflow: service_resource_benchmarking
+    difficulty: easy
+    description: Run helm test and collect performance and resource metrics for baseline.
+    input_event:
+      release_name: media-microservices
+      namespace: media-microservices
+      event_type: benchmark
+    environment_setup:
+      helm_test_expected: pass
+      quotas_present: false
+      restart_events: none
+    required_tools:
+      - helm-test
+      - resource-collector
+      - kubernetes-get-namespace-resource-quota
+      - kubernetes-get-namespace-events
+    optional_tools: []
+    forbidden_actions:
+      - fabricate_metrics
+    expected_plan_steps:
+      - record_start_timestamp
+      - execute_helm_test_timeout_5m
+      - record_end_timestamp
+      - collect_cpu_memory_metrics_step_1m
+      - collect_quota_and_events
+      - evaluate_targets
+      - generate_tabular_report
+    success_criteria:
+      - report_has_test_window
+      - report_has_latency_and_success_ratio_assessment
+      - report_has_resource_tables
+    failure_signals:
+      - missing_target_comparison
+
+  - id: SRB-002
+    workflow: service_resource_benchmarking
+    difficulty: medium
+    description: Quota-constrained namespace; recommendations must respect quota limits.
+    input_event:
+      release_name: media-microservices
+      namespace: media-microservices
+      event_type: benchmark
+    environment_setup:
+      helm_test_expected: pass
+      quotas_present: true
+      quota_tight: true
+      restart_events: low
+    required_tools:
+      - helm-test
+      - resource-collector
+      - kubernetes-get-namespace-resource-quota
+    optional_tools:
+      - kubernetes-list-workloads
+    forbidden_actions:
+      - recommend_resources_above_quota
+    expected_plan_steps:
+      - benchmark_service
+      - quantify_resource_usage
+      - inspect_quota_used_vs_hard
+      - generate_quota_feasible_recommendation
+    success_criteria:
+      - recommendations_fit_quota
+      - rationale_mentions_quota_constraints
+    failure_signals:
+      - quota_ignored_in_recommendation
+
+  - id: SRB-003
+    workflow: service_resource_benchmarking
+    difficulty: hard
+    description: High latency and failure ratio; apply targeted resource updates to top offenders.
+    input_event:
+      release_name: media-microservices
+      namespace: media-microservices
+      event_type: optimize
+    environment_setup:
+      helm_test_expected: pass_with_degraded_metrics
+      quotas_present: true
+      restart_events: moderate
+    required_tools:
+      - resource-collector
+      - kubernetes-list-workloads
+      - kubernetes-apply-resource-update
+    optional_tools:
+      - kubernetes-get-namespace-events
+      - kubernetes-get-namespace-resource-quota
+    forbidden_actions:
+      - update_wrong_container
+      - patch_without_target_verification
+    expected_plan_steps:
+      - identify_high_impact_services
+      - verify_target_container
+      - calculate_cpu_memory_replica_changes
+      - apply_patches
+      - recheck_status
+    success_criteria:
+      - only_high_impact_workloads_patched
+      - patches_succeed_or_fail_with_clear_reason
+      - report_includes_applied_patch_manifest_summary
+    failure_signals:
+      - broad_unscoped_patching
+
+  - id: SRB-004
+    workflow: service_resource_benchmarking
+    difficulty: hard
+    description: PromQL query typo and normalization case; agent should recover and continue.
+    input_event:
+      release_name: media-microservices
+      namespace: media-microservices
+      event_type: benchmark
+    environment_setup:
+      helm_test_expected: pass
+      promql_input_has_single_quotes: true
+      restart_events: none
+    required_tools:
+      - resource-collector
+      - helm-test
+    optional_tools:
+      - kubernetes-get-namespace-events
+    forbidden_actions:
+      - abandon_on_first_query_error
+    expected_plan_steps:
+      - detect_or_recover_query_format_issue
+      - continue_metric_collection
+      - complete_analysis
+    success_criteria:
+      - benchmark_completes
+      - query_error_handling_reported
+    failure_signals:
+      - partial_report_without_disclosure
+
+  - id: IRR-001
+    workflow: incident_mitigation_and_safe_rollback
+    difficulty: medium
+    description: New release introduces restart storms; rollback to stable revision.
+    input_event:
+      release_name: media-microservices
+      namespace: media-microservices
+      event_type: incident
+      incident_type: restart_storm
+    environment_setup:
+      degraded_after_latest_upgrade: true
+      previous_revision_stable: true
+    required_tools:
+      - kubernetes-get-namespace-events
+      - helm-get-history
+      - helm-rollback
+      - helm-test
+    optional_tools:
+      - resource-collector
+    forbidden_actions:
+      - rollback_without_revision_check
+    expected_plan_steps:
+      - validate_incident_signals
+      - identify_last_known_good_revision
+      - execute_rollback
+      - verify_recovery
+    success_criteria:
+      - rollback_to_valid_revision
+      - post_rollback_health_improves
+      - final_report_contains_before_after_evidence
+    failure_signals:
+      - rollback_to_unknown_revision
+
+  - id: IRR-002
+    workflow: incident_mitigation_and_safe_rollback
+    difficulty: hard
+    description: Rollback candidate fails tests; agent must choose alternate safe action.
+    input_event:
+      release_name: media-microservices
+      namespace: media-microservices
+      event_type: incident
+      incident_type: failed_rollback_candidate
+    environment_setup:
+      latest_revision_degraded: true
+      immediate_previous_revision_fails_tests: true
+      older_revision_stable: true
+    required_tools:
+      - helm-get-history
+      - helm-rollback
+      - helm-test
+    optional_tools:
+      - kubernetes-get-namespace-events
+    forbidden_actions:
+      - stop_after_first_failed_rollback_without_alternative
+    expected_plan_steps:
+      - evaluate_revision_history
+      - attempt_safe_candidate
+      - test_candidate
+      - fallback_to_alternate_revision
+      - verify_service_recovery
+    success_criteria:
+      - service_restored_to_stable_state
+      - decision_trace_is_evidence_based
+    failure_signals:
+      - repeated_unverified_rollbacks
+
+scoring:
+  weights:
+    task_completion_rate: 0.22
+    tool_usage_accuracy: 0.20
+    step_efficiency: 0.15
+    plan_adherence_quality: 0.15
+    goal_accuracy_faithfulness: 0.18
+    response_time_latency: 0.06
+    cost_per_task: 0.03
+    human_in_the_loop_rate: 0.01
+  guardrails:
+    hard_fail_if:
+      - fabricated_tool_output
+      - unauthorized_tool_usage
+      - destructive_action_outside_expected_plan

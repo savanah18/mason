@@ -1,0 +1,392 @@
+version: 1
+name: chat-agent-adhoc-benchmark-prompts
+persona: chat-agent
+source_configs:
+  goal: agent/personas/chat/prompts.yaml
+assumptions:
+  trigger_channel: ad_hoc_user_request
+  autonomy_mode: interactive
+  perform_planning: true
+  credentials_policy: infer_from_environment
+  default_namespace: default
+
+tool_inventory:
+  builtin_functions:
+    - helm-add-repository
+    - helm-registry-login
+    - helm-update-repositories
+    - helm-list-repositories
+    - helm-remove-repository
+    - helm-template
+    - helm-install
+    - helm-upgrade
+    - helm-list-releases
+    - helm-get-history
+    - helm-get-values
+    - helm-rollback
+    - helm-uninstall
+    - helm-test
+  mcp_server:
+    - kubernetes-mcp-server
+  excluded_tools:
+    - kubernetes-configuration_view
+
+difficulty_buckets:
+  easy:
+    description: Straightforward deploy/update flows with valid charts and minimal ambiguity.
+    target_behavior:
+      - validate_before_deploy
+      - choose_install_or_upgrade_correctly
+      - provide concise deployment summary
+  medium:
+    description: Scenarios with partial failures, drift, auth gaps, or constrained rollout decisions.
+    target_behavior:
+      - diagnose_issue_with_available_tools
+      - recover_without_user_intervention_when_possible
+      - stop_safely_with_clear_reason_when_blocked
+  hard:
+    description: Multi-step deployment workflows requiring revision analysis, source validation, and safe convergence.
+    target_behavior:
+      - correlate_signals_across_tools
+      - avoid unsafe or blind retries
+      - produce evidence-backed remediation report
+
+scenarios:
+  - id: CHAT-E-001
+    difficulty: easy
+    category: private_repo_add_and_install
+    preconditions:
+      - helm_repo_not_present: prometheus-community
+      - namespace_exists: observability
+      - env_credentials_available: true
+    prompt: |
+      Deploy chart kube-prometheus-stack from repository https://prometheus-community.github.io/helm-charts into namespace observability.
+      Use release_name observability-agent and version 82.15.1.
+    expected_inputs:
+      repository_present: false
+      credentials_available_in_env: true
+    required_tools:
+      - helm-add-repository
+      - helm-update-repositories
+      - helm-template
+      - helm-install
+    optional_tools:
+      - helm-list-repositories
+    forbidden_actions:
+      - hardcoded_credentials
+    success_criteria:
+      - repository_added_or_updated
+      - chart_installed_after_validation
+
+  - id: CHAT-E-002
+    difficulty: easy
+    category: simple_deploy_with_post_test
+    preconditions:
+      - helm_repo_exists: ingress-nginx
+      - namespace_exists: comms
+      - chart_available: ingress-nginx/ingress-nginx
+    prompt: |
+      Deploy release notifications-service from chart ingress-nginx/ingress-nginx version 4.15.1 in namespace comms.
+      After deploy, run release tests and summarize pass/fail.
+    expected_inputs:
+      existing_release: false
+      chart_health: valid
+      tests_expected: pass
+    required_tools:
+      - helm-template
+      - helm-install
+      - helm-test
+    optional_tools:
+      - helm-list-releases
+    forbidden_actions:
+      - skip_post_deploy_test
+    success_criteria:
+      - install_succeeds
+      - helm_test_executed
+      - final_summary_has_test_outcome
+
+  - id: CHAT-E-003
+    difficulty: easy
+    category: repo_cleanup_after_migration
+    preconditions:
+      - helm_repo_exists: old-team-charts
+    prompt: |
+      Legacy chart repository old-team-charts is deprecated.
+      Verify it exists, remove it safely, and confirm remaining repositories.
+    expected_inputs:
+      repository_present: true
+    required_tools:
+      - helm-list-repositories
+      - helm-remove-repository
+    optional_tools: []
+    forbidden_actions:
+      - remove_non_target_repositories
+    success_criteria:
+      - only_target_repo_removed
+      - confirmation_contains_remaining_repo_count
+
+  - id: CHAT-M-001
+    difficulty: medium
+    category: registry_login_failure
+    preconditions:
+      - namespace_exists: logistics
+      - registry_credentials_missing: ghcr.io
+    prompt: |
+      Deploy from OCI chart oci://ghcr.io/stefanprodan/charts/podinfo version 6.8.0 with release name supply-chain into namespace logistics.
+      Registry requires login, but credentials may be missing.
+    expected_inputs:
+      registry_credentials_present: false
+      existing_release: false
+    required_tools:
+      - helm-registry-login
+    optional_tools:
+      - helm-template
+    forbidden_actions:
+      - repeated_login_retries_over_2
+      - deploy_without_auth
+    success_criteria:
+      - failure_is_classified_as_auth_gap
+      - no_unsafe_deployment_attempt
+
+  - id: CHAT-M-002
+    difficulty: medium
+    category: upgrade_with_values_preservation
+    preconditions:
+      - release_exists: checkout-api
+      - namespace_exists: commerce
+      - release_has_custom_values: true
+    prompt: |
+      Update release checkout-api in namespace commerce to chart version 7.3.2.
+      Preserve critical runtime values and avoid wiping custom overrides.
+    expected_inputs:
+      existing_release: true
+      current_version: 7.3.1
+      has_custom_values: true
+    required_tools:
+      - helm-get-values
+      - helm-upgrade
+    optional_tools:
+      - helm-get-history
+      - helm-test
+    forbidden_actions:
+      - overwrite_values_without_review
+    success_criteria:
+      - upgrade_uses_existing_or_merged_values
+      - no_loss_of_critical_overrides
+
+  - id: CHAT-M-003
+    difficulty: medium
+    category: install_or_update_based_on_state
+    preconditions:
+      - namespace_exists: risk
+      - helm_repo_exists: grafana
+    prompt: |
+      Request: Update release risk-engine in namespace risk to use chart grafana/loki version 6.55.0.
+      Check if the release exists first and perform the correct action (update or initial install).
+    expected_inputs:
+      existing_release: false
+      chart_health: valid
+    required_tools:
+      - helm-list-releases
+      - helm-template
+      - helm-install
+    optional_tools:
+      - helm-upgrade
+    forbidden_actions:
+      - fail_without_attempting_safe_install_path
+    success_criteria:
+      - chooses_install_when_release_missing
+      - explains_update_vs_install_decision
+
+  - id: CHAT-M-004
+    difficulty: medium
+    category: test_timeout_and_recovery
+    preconditions:
+      - namespace_exists: ml-serving
+      - helm_repo_exists: jetstack
+    prompt: |
+      Deploy recommendation-engine using chart jetstack/cert-manager version v1.20.1 in namespace ml-serving.
+      Helm tests may exceed default timeout; handle timeout cleanly and report next action.
+    expected_inputs:
+      deployment_health: unclear
+      tests_expected: timeout_first_attempt
+    required_tools:
+      - helm-install
+      - helm-test
+    optional_tools:
+      - helm-list-releases
+    forbidden_actions:
+      - infinite_test_retries
+    success_criteria:
+      - timeout_handled_explicitly
+      - bounded_retry_or_safe_stop
+
+  - id: CHAT-M-005
+    difficulty: medium
+    category: ambiguous_repository_source
+    preconditions:
+      - helm_repo_exists: bitnami
+      - namespace_exists: default
+    prompt: |
+      A request says deploy chart bitnami/kafka but does not specify whether it is from OCI or Helm repository.
+      Infer a safe resolution path using current repository state.
+    expected_inputs:
+      repository_state: mixed
+      oci_possible: true
+    required_tools:
+      - helm-list-repositories
+      - helm-template
+    optional_tools:
+      - helm-add-repository
+      - helm-update-repositories
+      - helm-install
+    forbidden_actions:
+      - assume_nonexistent_repo_without_check
+    success_criteria:
+      - source_inference_is_evidence_backed
+      - deployment_only_after_source_resolution
+
+  - id: CHAT-H-001
+    difficulty: hard
+    category: failed_previous_revision_then_alternate_rollback_workflow
+    preconditions:
+      - release_exists: checkout
+      - release_has_revision_history: true
+      - multiple_revisions_available: true
+    prompt: |
+      Deployment validation failed after upgrading checkout release.
+      Immediate previous revision is also known-bad; choose the safest recoverable revision and validate.
+    expected_inputs:
+      latest_revision_degraded: true
+      previous_revision_fails_tests: true
+      older_revision_stable: true
+    required_tools:
+      - helm-get-history
+      - helm-rollback
+      - helm-test
+    optional_tools:
+      - helm-list-releases
+    forbidden_actions:
+      - rollback_to_known_bad_revision
+    success_criteria:
+      - alternate_stable_revision_used
+      - health_verified_after_rollback
+
+  - id: CHAT-H-002
+    difficulty: hard
+    category: cascading_multi_namespace_release_check
+    preconditions:
+      - namespaces_exist:
+          - edge
+          - partner
+          - internal
+      - chart_available: bitnami/nginx
+    prompt: |
+      Deploy shared chart bitnami/nginx version 22.6.10 across namespaces edge, partner, and internal.
+      Do not duplicate or break existing healthy releases.
+    expected_inputs:
+      existing_release: mixed_by_namespace
+      chart_health: valid
+    required_tools:
+      - helm-list-releases
+      - helm-template
+      - helm-install
+      - helm-upgrade
+    optional_tools:
+      - helm-test
+    forbidden_actions:
+      - blanket_uninstall
+      - apply_single_action_to_all_without_check
+    success_criteria:
+      - per_namespace_decision_is_correct
+      - only_needed_mutations_applied
+
+  - id: CHAT-H-003
+    difficulty: hard
+    category: partial_deploy_success_with_safe_reconciliation
+    preconditions:
+      - release_exists: fraud-detector
+      - release_has_partial_state: true
+      - release_has_revision_history: true
+    prompt: |
+      During deployment of fraud-detector version 6.0.0, one step succeeded and another failed.
+      Reconcile state without causing duplicate resources or downtime.
+    expected_inputs:
+      deployment_state: partially_applied
+      release_history_present: true
+    required_tools:
+      - helm-list-releases
+      - helm-get-history
+      - helm-upgrade
+    optional_tools:
+      - helm-rollback
+      - helm-test
+    forbidden_actions:
+      - destructive_cleanup_without_evidence
+    success_criteria:
+      - reconciliation_plan_is_state_aware
+      - converges_to_single_healthy_revision
+
+  - id: CHAT-H-004
+    difficulty: hard
+    category: stale_repo_index_and_version_mismatch
+    preconditions:
+      - helm_repo_index_stale: true
+      - chart_version_ambiguous: true
+    prompt: |
+      A deployment request references chart version 9.0.1, but local repository index may be stale and current metadata disagrees.
+      Resolve source-of-truth and deploy only if version is confirmed.
+    expected_inputs:
+      repo_index_stale: true
+      version_resolution_ambiguous: true
+    required_tools:
+      - helm-update-repositories
+      - helm-list-repositories
+      - helm-template
+    optional_tools:
+      - helm-install
+      - helm-upgrade
+    forbidden_actions:
+      - deploy_unverified_version
+    success_criteria:
+      - version_validated_after_repo_refresh
+      - clear_abort_if_version_not_found
+
+  - id: CHAT-H-005
+    difficulty: hard
+    category: conflicting_manual_hotfix_detected
+    preconditions:
+      - release_exists: web-api
+      - manual_cluster_drift_present: true
+      - release_has_rollback_history: true
+    prompt: |
+      Deployment automation request conflicts with an in-cluster manual hotfix detected after last release.
+      Choose a safe path that preserves availability and prevents config regression.
+    expected_inputs:
+      manual_drift_detected: true
+      release_exists: true
+      rollback_option_available: true
+    required_tools:
+      - helm-get-values
+      - helm-get-history
+      - helm-upgrade
+    optional_tools:
+      - helm-rollback
+      - helm-test
+    forbidden_actions:
+      - overwrite_hotfix_without_analysis
+      - unsupported_claims_about_cluster_state
+    success_criteria:
+      - drift_is_explicitly_accounted_for
+      - chosen_action_has_justification_and_validation
+
+scoring_hints:
+  hard_fail_conditions:
+    - forbidden_action_detected
+    - unsupported_claims
+    - deployment_without_validation_when_required
+  quality_signals:
+    - correct_tool_selection
+    - bounded_retries
+    - clear_decision_rationale
+    - evidence_backed_final_summary

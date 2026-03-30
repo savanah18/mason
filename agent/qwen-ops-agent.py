@@ -103,7 +103,6 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         self.sessions = {} # PLACEHOLDER ONLY
         self.memory_client = self._initialize_memory_manager()
 
-        print(goal)
         print(f"[I] Initializing {PERSONA} agent with goal \n {goal.description}")
         # Initialize AutonomousAgent
         AutonomousAgent.__init__(
@@ -132,22 +131,27 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         apply_mcp_ping_compat_patch()
 
     async def reason(self, percepts=[], workflow_id=None):
-        # TODO AGENT WORKFLOW METRICS
-        # Latency (Generation Latency, E2E Latency)
-
+        #****************** START OF WORKFLOW ******************
         print("Perfoming reasoning.... ")
+        workflow_start_time = datetime.now()
         # TODO Goal Life Cycle Management
-        workflow_id: str = workflow_id or str(uuid.uuid4())
+        try:
+            print("Trying to extract workflow id from percepts")
+            workflow_id: str = percepts[0]['data'].get('workflow_id', None) or str(uuid.uuid4())
+            if workflow_id:
+                print(f"Extracted {workflow_id} from percepts")
+        except Exception as e:
+            workflow_id = str(uuid.uuid4())
 
         # TODO Prompt should be dynamic, and base prompt should always be retrieved to accomodate prompt updates.
         prompt = {
             'role': 'user', 
             'content': f"""
-                Your task is to ALWAYS execute the requested action, even if it looks similar to a previous request.
+                IMPORTANT! Your task is to **ALWAYS** execute necesary tools for the requested task, even if it task looks similar to a previous request.
                 Do not assume prior execution is sufficient.
-                Current workflow ID: {workflow_id}
                 Percepts: {json.dumps([p['data'] for p in percepts])}
-                Action: {self.goal.base_prompt}                
+                Current workflow ID: {workflow_id}
+                Action: {self.goal.base_prompt}
             """
         }
 
@@ -163,23 +167,30 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         tmp = ""
         assistant_response  = ""
         structured_responses: List[Dict] = []
-        task_token_cost = None
+        task_total_token_cost = None
+        task_gen_token_cost = None
         try:
             # TODO Measure generation latency here
+            gen_time = datetime.now()
             for response in self.run(messages=messages):
                 tmp = typewriter_print(response, tmp)
+            gen_latency = datetime.now() - gen_time
 
             structured_responses = response
             # TODO TEST Measure task codes (tokens)
-            # ---> system prompt + user prompt + tool call/response + final answer
-            to_compute_tokens = [{"role": "system", "content": system_message}] + prompt + structure_responses
-            task_token_cost = self.compute_context_length(to_compute_tokens)
+            # ---> system prompt + history + user prompt + tool call/response + final answer
+            to_compute_tokens = [{"role": "system", "content": self.goal.description }] + messages + structured_responses
+            task_total_token_cost = self.compute_total_tokens(to_compute_tokens)
+            task_gen_token_cost = self.compute_total_tokens(structured_responses)
 
             assistant_response = response[-1]['content'] # Most workflow agent answer are now in markdown format. 
             # print(structured_responses)
         except Exception as e:
             assistant_response = f"Error: {type(e)} {str(e)}"
+        #****************** END OF WORKFLOW ******************
+        workflow_latency = datetime.now() - workflow_start_time
 
+        #****************** START OF WORKFLOW STATS AND TRACEABILITY ******************
         # Determine if tools called have response, record tool execcution details for evaluations
         workflow_exec  = process_workflow_execution(
             session_id = self.session_id, 
@@ -188,8 +199,14 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
             response_messages = structured_responses
         )
         # TODO add token cost, latency, etc. and record
-        workflow_exec.task_token_cost = task_token_cost
+        workflow_exec.task_total_token_cost = task_total_token_cost
+        workflow_exec.task_gen_token_cost = task_gen_token_cost
+        workflow_exec.model_generation_latency = gen_latency.seconds + gen_latency.microseconds/1e6
+        workflow_exec.workflow_latency = workflow_latency.seconds + workflow_latency.microseconds/1e6
+
+        # record 
         workflow_exec.record_workflow_state()
+        #****************** END OF WORKFLOW STATS AND TRACEABILITY ******************
 
 
         if workflow_exec.all_tools_verified:
@@ -197,6 +214,8 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         else:
             assistant_response = f"Unverified Tool Calls Found!"
 
+
+        #****************** START OF HISTORIZATION ******************
         # Add assistant responses to history
         if structured_responses:
             session.messages.extend(structured_responses[-1:]) #final answer only
@@ -205,7 +224,8 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
             session_id = self.session_id,
             memory = session
         )
-        
+        #****************** END OF HISTORIZATION ******************
+
 async def main():
     agent = QwenOpsAgent(
         goal = f"./personas/{PERSONA}/goal.yaml",
