@@ -1,0 +1,39 @@
+id: CHAT-AH-004.0
+chat-prompt: |
+  Ad-hoc request: identify one high-impact deployment and apply a targeted right-size update
+  for cpu/memory in media-microservices namespace, then report patch summary.
+  Constraint: use up to 3 related tool calls.
+expected-event-input: |
+  Your task is to execute an ad-hoc operational request with strict tool-call budget.
+  Do not assume prior execution is sufficient.
+  Current workflow ID: <WORKFLOW_ID>
+  Percepts: [{"event_type":"ad_hoc","namespace":"media-microservices","task":"targeted-rightsize","max_related_tool_calls":3,"required_tools":["kubernetes-list-workloads","resource-collector","kubernetes-apply-resource-update"]}]
+  Action: Process requests using your defined workflow.
+pre-condition-script: |
+  # Pre-condition: namespace must be available and workloads should exist.
+  kubectl get ns media-microservices || kubectl create ns media-microservices
+  kubectl get deploy -n media-microservices --no-headers | wc -l
+execution-script: |
+  export CHAT_ENDPOINT=127.0.0.1:8002
+  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+
+  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  echo CHAT_PROMPT: ${CHAT_PROMPT}
+  echo SESSION_ID: ${SESSION_ID}
+
+  json_payload=$(jq -n \
+  --arg message "$CHAT_PROMPT" \
+  --arg session_id "$SESSION_ID" \
+  '{message: $message, session_id: $session_id}')
+
+  curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+    -H "Content-Type: application/json" \
+    -d "$json_payload"
+expected-execution-time: "180"
+output-retrieval-script: |
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  # Cleanup intentionally omitted; scenario evaluates safe, bounded updates.
+  true

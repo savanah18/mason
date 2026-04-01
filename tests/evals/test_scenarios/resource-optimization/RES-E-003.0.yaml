@@ -1,0 +1,42 @@
+id: RES-E-003
+chat-prompt: |
+  Please optimize resources for the media-microservices service in media-microservices namespace.
+  This environment has pre-determined pod-level resource requests and limits already set.
+  Run performance benchmarks, collect metrics against targets (avg latency ≤100ms, p90 latency ≤200ms, success ≥99%), and validate whether current allocations meet targets.
+  Send the optimization request to Kafka topic tests.normal as one JSON event payload.
+  Include release name and namespace (media-microservices) in the payload.
+  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID> and include extra_instruction in the same JSON payload.
+expected-event-input: |
+  Your task is to execute a load test and performance analysis workflow with pre-determined resources.
+  Do not assume prior test results are sufficient.
+  Current workflow ID: <WORKFLOW_ID>
+  Percepts: [{"event_type":"benchmark","release_name":"media-microservices","namespace":"media-microservices","test_type":"load-test","resource_constraint_mode":"pre-determined"}]
+  Action: Execute resiliency and performance optimization workflow.
+pre-condition-script: |
+  # Pre-condition: Verify media-microservices namespace with existing pods and pre-determined resource constraints.
+  kubectl get ns media-microservices || kubectl create ns media-microservices
+  kubectl get pods -n media-microservices --no-headers | wc -l
+execution-script: |
+  export CHAT_ENDPOINT=127.0.0.1:8002
+  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+
+  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  echo CHAT_PROMPT: ${CHAT_PROMPT}
+  echo SESSION_ID: ${SESSION_ID}
+
+  json_payload=$(jq -n \
+  --arg message "$CHAT_PROMPT" \
+  --arg session_id "$SESSION_ID" \
+  '{message: $message, session_id: $session_id}')
+
+  curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+    -H "Content-Type: application/json" \
+    -d "$json_payload"
+expected-execution-time: "300"
+output-retrieval-script: |
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  # Cleanup: Preserve media-microservices namespace and running services
+  true

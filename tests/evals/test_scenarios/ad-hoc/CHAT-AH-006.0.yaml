@@ -1,0 +1,41 @@
+id: CHAT-AH-006.0
+chat-prompt: |
+  Ad-hoc request: use kubernetes-mcp-server to confirm target deployment state,
+  apply one bounded resource update, validate with a metrics snapshot, and publish one completion event.
+  Constraint: use up to 5 related tool calls.
+expected-event-input: |
+  Your task is to execute an ad-hoc operational request with strict tool-call budget.
+  Do not assume prior execution is sufficient.
+  Current workflow ID: <WORKFLOW_ID>
+  Percepts: [{"event_type":"ad_hoc","release_name":"media-microservices","namespace":"media-microservices","task":"mcp-guided-patch-verify-emit","max_related_tool_calls":5,"required_tools":["kubernetes-mcp-server","kubernetes-list-workloads","kubernetes-apply-resource-update","resource-collector","kafka-produce-message"]}]
+  Action: Process requests using your defined workflow.
+pre-condition-script: |
+  # Pre-condition: namespace exists and has workloads available for bounded update.
+  kubectl get ns media-microservices || kubectl create ns media-microservices
+  kubectl get deploy -n media-microservices --no-headers | wc -l
+  # Assumption: kubernetes-mcp-server endpoint is reachable in runtime.
+  echo "Assume kubernetes-mcp-server is available for this scenario."
+execution-script: |
+  export CHAT_ENDPOINT=127.0.0.1:8002
+  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+
+  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  echo CHAT_PROMPT: ${CHAT_PROMPT}
+  echo SESSION_ID: ${SESSION_ID}
+
+  json_payload=$(jq -n \
+  --arg message "$CHAT_PROMPT" \
+  --arg session_id "$SESSION_ID" \
+  '{message: $message, session_id: $session_id}')
+
+  curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+    -H "Content-Type: application/json" \
+    -d "$json_payload"
+expected-execution-time: "240"
+output-retrieval-script: |
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  # Cleanup intentionally omitted; scenario validates bounded mutation behavior.
+  true

@@ -1,0 +1,68 @@
+id: RES-E-003.1
+chat-prompt: |
+  Please optimize resources for the media-microservices service in media-microservices namespace.
+  This scenario starts from a low baseline profile derived from service call traces in the architecture flow.
+  Run performance benchmarks, collect metrics against targets (avg latency ≤100ms, p90 latency ≤200ms, success ≥99%), and recommend resource allocations.
+  Send the optimization request to Kafka topic tests.normal as one JSON event payload.
+  Include release name and namespace (media-microservices) in the payload.
+  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID> and include extra_instruction in the same JSON payload.
+expected-event-input: |
+  Your task is to execute a load test and performance analysis workflow with pre-determined resources.
+  Do not assume prior test results are sufficient.
+  Current workflow ID: <WORKFLOW_ID>
+  Percepts: [{"event_type":"benchmark","release_name":"media-microservices","namespace":"media-microservices","test_type":"load-test","resource_constraint_mode":"pre-determined-low"}]
+  Action: Execute resiliency and performance optimization workflow.
+pre-condition-script: |
+  # Pre-condition: Apply trace-based low baseline profile to all deployments.
+  NS=media-microservices
+  kubectl get ns ${NS} || kubectl create ns ${NS}
+
+  # Baseline for all deployments: replicas=1, resources at lower bound.
+  for d in $(kubectl get deploy -n ${NS} -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'); do
+    kubectl scale deploy "$d" -n ${NS} --replicas=1 || true
+    kubectl set resources deploy "$d" -n ${NS} --all-containers \
+      --requests=cpu=200m,memory=100Mi --limits=cpu=200m,memory=100Mi || true
+  done
+
+  # Tier-1 hot path from trace graph.
+  for d in nginx-web-server compose-review-service review-storage-service movie-review-service user-review-service; do
+    kubectl set resources deploy "$d" -n ${NS} --all-containers \
+      --requests=cpu=500m,memory=400Mi --limits=cpu=500m,memory=400Mi || true
+  done
+
+  # Tier-2 API path services.
+  for d in movie-id-service rating-service text-service user-service page-service; do
+    kubectl set resources deploy "$d" -n ${NS} --all-containers \
+      --requests=cpu=400m,memory=300Mi --limits=cpu=400m,memory=300Mi || true
+  done
+
+  # Stateful backends: singleton with memory-biased sizing.
+  for d in $(kubectl get deploy -n ${NS} -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | grep -E 'mongodb|redis|memcached'); do
+    kubectl scale deploy "$d" -n ${NS} --replicas=1 || true
+    kubectl set resources deploy "$d" -n ${NS} --all-containers \
+      --requests=cpu=600m,memory=1Gi --limits=cpu=600m,memory=1Gi || true
+  done
+execution-script: |
+  export CHAT_ENDPOINT=127.0.0.1:8002
+  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+
+  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  echo CHAT_PROMPT: ${CHAT_PROMPT}
+  echo SESSION_ID: ${SESSION_ID}
+
+  json_payload=$(jq -n \
+  --arg message "$CHAT_PROMPT" \
+  --arg session_id "$SESSION_ID" \
+  '{message: $message, session_id: $session_id}')
+
+  curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+    -H "Content-Type: application/json" \
+    -d "$json_payload"
+expected-execution-time: "300"
+output-retrieval-script: |
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  # Cleanup: Preserve media-microservices namespace and running services
+  true
