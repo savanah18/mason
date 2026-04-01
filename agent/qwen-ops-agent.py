@@ -181,6 +181,7 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
             # ---> system prompt + history + user prompt + tool call/response + final answer
             to_compute_tokens = [{"role": "system", "content": self.goal.description }] + messages + structured_responses
             task_total_token_cost = self.compute_total_tokens(to_compute_tokens)
+            # TODO (exclude tooling input tokens from structured response)
             task_gen_token_cost = self.compute_total_tokens(structured_responses)
 
             assistant_response = response[-1]['content'] # Most workflow agent answer are now in markdown format. 

@@ -1,15 +1,22 @@
-id: DEP-E-001.0
+id: DEP-E-001.2
 chat-prompt: |
-  Send a package installation request with the following information release name media-api from bitnamin/nginx version 22.6.10 on media namespace with workflow_id <WORKFLOW_ID>. workflow_id should be part of the message payload. Send information using JSON format. Do not generate fake response, Always execute tool call.
+  Please process a fresh install for media-api in namespace media using chart bitnami/nginx version 22.6.10.
+  Since the namespace may already exist, you may choose explicit verification or proactive namespace setup.
+  Send the request as one Kafka event payload in JSON.
+  Include the core fields from the request, and include workflow metadata if present.
+  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID> and include extra_instruction in the same JSON payload.
 expected-event-input: |
   Your task is to ALWAYS execute the requested action, even if it looks similar to a previous request.
   Do not assume prior execution is sufficient.
-  Current workflow ID: ad169ff3-ebbf-492e-b630-f76c494855c2
+  Current workflow ID: <WORKFLOW_ID>
   Percepts: [{"event_type": "publish", "release_name": "media-api", "chart": "bitnami/nginx", "version": "22.6.10", "namespace": "media"}]
   Action: Process requests using your defined workflow.
 pre-condition-script: |
-  helm uninstall media-api -n media
-  kubectl delete ns media 
+  # Pre-condition: namespace already exists but target release is absent.
+  helm repo add bitnami https://charts.bitnami.com/bitnami || true
+  helm repo update
+  kubectl create ns media --dry-run=client -o yaml | kubectl apply -f -
+  helm uninstall media-api -n media || true
 execution-script: |
   export CHAT_ENDPOINT=127.0.0.1:8002
   SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
@@ -31,4 +38,8 @@ execution-script: |
 expected-execution-time: "120"
 output-retrieval-script: |
   python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
-
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  helm uninstall media-api -n media || true
+  kubectl delete ns media --ignore-not-found=true

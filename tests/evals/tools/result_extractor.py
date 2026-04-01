@@ -3,6 +3,7 @@ import sys
 import json
 import time
 
+# TODO Prefix all information with test case id as well
 def main(workflow_id: str, timeout: int = 30, interval: int = 2):
     try:
         # Connect to Redis

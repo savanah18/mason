@@ -136,7 +136,7 @@ class ChatPanel {
     } catch (error) {
       this.serverStatus = `Cannot reach ${BACKEND_URL}`;
       this.backendReady = false;
-      this.addMessage('assistant', 'Cannot connect to backend. Start with: python agent/backend.py');
+      this.addMessage('assistant', 'Cannot connect to backend. Please ensure the server is running and accessible.');
     }
   }
 
