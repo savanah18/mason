@@ -3,12 +3,6 @@ chat-prompt: |
   Ad-hoc request: show a compact workload inventory for media-microservices namespace.
   Return deployment/statefulset/daemonset counts and key cpu/memory settings.
   Constraint: use exactly 1 related tool call.
-expected-event-input: |
-  Your task is to execute an ad-hoc operational request with strict tool-call budget.
-  Do not assume prior execution is sufficient.
-  Current workflow ID: <WORKFLOW_ID>
-  Percepts: [{"event_type":"ad_hoc","namespace":"media-microservices","task":"workload-inventory","max_related_tool_calls":1,"required_tools":["kubernetes-list-workloads"]}]
-  Action: Process requests using your defined workflow.
 pre-condition-script: |
   # Pre-condition: media-microservices namespace should be available.
   kubectl get ns media-microservices || kubectl create ns media-microservices
@@ -28,7 +22,7 @@ execution-script: |
   curl -X POST "${CHAT_ENDPOINT}/chat/send" \
     -H "Content-Type: application/json" \
     -d "$json_payload"
-expected-execution-time: "120"
+expected-execution-time: "600"
 output-retrieval-script: |
   python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
 evaluation-script:

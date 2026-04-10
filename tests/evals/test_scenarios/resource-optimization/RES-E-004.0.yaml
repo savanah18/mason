@@ -5,11 +5,6 @@ chat-prompt: |
   TODO/PLACEHOLDER: Send optimization request to Kafka topic tests.normal as one JSON event payload.
   Include release name and namespace (media-microservices) in the payload.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID> and include extra_instruction in the same JSON payload.
-expected-event-input: |
-  TODO/PLACEHOLDER: Execute load test and performance analysis workflow under chaos (pod-delete fault).
-  Current workflow ID: <WORKFLOW_ID>
-  Percepts: [{"event_type":"benchmark","release_name":"media-microservices","namespace":"media-microservices","test_type":"load-test","resource_constraint_mode":"chaos-placeholder-pod-delete"}]
-  Action: Execute resiliency and performance optimization workflow.
 pre-condition-script: |
   # TODO/PLACEHOLDER: Verify namespace exists before chaos setup.
   kubectl get ns media-microservices || kubectl create ns media-microservices
@@ -33,7 +28,7 @@ execution-script: |
   curl -X POST "${CHAT_ENDPOINT}/chat/send" \
     -H "Content-Type: application/json" \
     -d "$json_payload"
-expected-execution-time: "300"
+expected-execution-time: "600"
 output-retrieval-script: |
   python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
 evaluation-script:

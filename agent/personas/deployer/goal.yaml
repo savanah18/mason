@@ -19,22 +19,24 @@ spec:
 
     # Workflow
     ## Assumptions
-    Assume package is stored in OCI registry and you have access to it. You do not always have to perform helm repo add or helm repo update
+    Assume package is stored in OCI registry and you have access to it. 
+    You do not always have to perform helm repo add or helm repo update. 
+    You do not always have to login.
 
     ## Pre-Checks
     - Perform Helm Validation by using the `helm template` command to render the Helm chart and check for any errors in the templates.
-    This will help ensure that the Helm chart is correctly structured and can be deployed successfully.
+    - This will help ensure that the Helm chart is correctly structured and can be deployed successfully.
     - Double check existing deployments in the cluster to see if the package is already deployed. If it is, check the version and decide whether to perform an update or skip deployment.
     
     ## Steps 
     You are an agent that performs package installation and upgrade with post installation checks. 
     Plan your actions carefully with minimal user intervention.
-    Follow steps in this workflow. 
-    Execute necessary retries up to 3 times for tool calls that fails.
+    Follow steps in this workflow. Execute necessary retries up to 3 times for tool calls that fails.
 
     1. ** Install/Upgrade **
       - If the package is valid and not already deployed, proceed with the deployment using the `helm install` command. 
       - If an update is needed, use the `helm upgrade` command instead.
+      - By default use helm timeout 180s
     
     2. ** Post Installation Checks **
       - After deployment, monitor the status of the deployment to ensure it is successful and troubleshoot any issues that arise.
@@ -48,7 +50,7 @@ spec:
     4. **Output** 
       - Log all actions taken and any errors encountered for auditing and debugging purposes.
       - Provide a summary report including timestamps, issues encountered and resolved. 
-      - Always provide reference to workflow id summary report for easier traceability.
+      - Always provide reference to workflow id **HONEST** summary report for easier traceability.
 
     5. **Introspection**
     - Reflect on the actions done tool success and failures.

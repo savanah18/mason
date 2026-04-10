@@ -23,7 +23,7 @@ from templates.core.context_compaction import (
 # Memory Managment
 from transformers import AutoTokenizer
 from agent_memory_client import MemoryAPIClient, MemoryClientConfig
-from agent_memory_client.models import WorkingMemory
+from agent_memory_client.models import WorkingMemory, MemoryMessage
 
 from templates.core.mcp_compat import apply_mcp_ping_compat_patch
 from templates.core.workflows import (
@@ -122,6 +122,9 @@ class ChatAgentBackend(BaseAgent, MemoryManagementMixin):
         assistant_response  = ""
         structured_responses: List[Dict] = []
         try:
+            # TODO Measure generation latency here
+            # TODO TEST Measure task cost (tokens)
+            # TODO add token cost, latency, etc. in record
             for response in self.agent.run(messages=messages):
                 tmp = typewriter_print(response, tmp) # for visual purposes 
 
@@ -148,7 +151,8 @@ class ChatAgentBackend(BaseAgent, MemoryManagementMixin):
 
         # Add assistant responses to history
         if structured_responses:
-            session.messages.extend(structured_responses[-1:]) #final answer only
+            memory_msgs = [MemoryMessage(role=sr['role'],content=sr['content']) for sr  in structured_responses[-1:]]
+            session.messages.extend(memory_msgs) #final answer only
 
 
         print(f"✅ After agent response: {len(session.messages)} total messages in session")
@@ -160,12 +164,6 @@ class ChatAgentBackend(BaseAgent, MemoryManagementMixin):
     
     def get_health_status(self) -> Dict:
         """Get backend health status."""
-        # cache_stats = {
-        #     "total": len(self.execution_cache),
-        #     "in_progress": sum(1 for v in self.execution_cache.values() if v == "IN_PROGRESS"),
-        #     "success": sum(1 for v in self.execution_cache.values() if v == "SUCCESS"),
-        #     "failed": sum(1 for v in self.execution_cache.values() if v == "FAILED"),
-        # }
         return {
             "status": "healthy",
             "mcp_tools_loaded": self.tools_count,

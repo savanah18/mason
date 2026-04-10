@@ -7,10 +7,10 @@ metadata:
     type: autonomous
 spec:
   mcp-servers:
-    # kubernetes:
-    #   type: "streamable-http"
-    #   url: "http://kubernetes-mcp-server:8081/mcp"
-    #   sse_read_timeout: 30
+    kubernetes:
+      type: "streamable-http"
+      url: "http://kubernetes-mcp-server:8081/mcp"
+      sse_read_timeout: 30
     litmuschaos:
       command: "/app/actions/mcp/servers/litmus-chaos/litmuschaos-mcp-server" 
       args: []
@@ -32,9 +32,9 @@ spec:
   - "helm-template"
   - "helm-list-releases"
   - "helm-get-values"
-  - "helm-upgrade"
-  - "helm-rollback"
-  - "helm-test"
+  # - "helm-upgrade"
+  # - "helm-rollback"
+  # - "helm-test"
   - "kafka-produce-message"
   - "resource-collector"
   - "kubernetes-list-workloads"

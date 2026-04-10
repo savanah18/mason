@@ -1,0 +1,39 @@
+id: DEP-M-001.0
+chat-prompt: |
+  Please process a publish request for media-api in namespace media using chart bitnami/nginx version 22.6.10.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx instead of Helm repo URLs.
+  A release with the same name may already be present, so you may choose an upgrade-first or conflict-remediation path before finalizing.
+  Send the request as one Kafka event payload in JSON.
+  Include the core fields from the request, and include workflow metadata if present.
+  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID> and include extra_instruction in the same JSON payload.
+pre-condition-script: |
+  # Pre-condition: same release name exists with an older chart version.
+  echo "Skipping helm repo add: using OCI charts"
+  echo "Skipping helm repo update: using OCI charts"
+  kubectl create ns media --dry-run=client -o yaml | kubectl apply -f -
+  helm uninstall media-api -n media || true
+  helm install media-api oci://registry-1.docker.io/bitnamicharts/nginx --version 22.6.9 -n media
+execution-script: |
+  export CHAT_ENDPOINT=127.0.0.1:8002
+  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+
+  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  echo CHAT_PROMPT: ${CHAT_PROMPT}
+  echo SESSION_ID: ${SESSION_ID}
+
+  json_payload=$(jq -n \
+  --arg message "$CHAT_PROMPT" \
+  --arg session_id "$SESSION_ID" \
+  '{message: $message, session_id: $session_id}')
+
+  curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+    -H "Content-Type: application/json" \
+    -d "$json_payload"
+expected-execution-time: "600"
+output-retrieval-script: |
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  helm uninstall media-api -n media || true
+  kubectl delete ns media --ignore-not-found=true

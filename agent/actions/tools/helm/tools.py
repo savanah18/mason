@@ -74,36 +74,6 @@ def parse_bool(value: Any, default: bool = False) -> bool:
     return bool(value)
 
 
-def parse_duration_seconds(value: Optional[str], default: int = 300) -> int:
-    """Parse duration strings like 5m, 120s, 2h into seconds."""
-    if not value:
-        return default
-    if isinstance(value, (int, float)):
-        return int(value)
-
-    text = str(value).strip().lower()
-    if not text:
-        return default
-
-    # Support plain integer seconds
-    if text.isdigit():
-        return int(text)
-
-    try:
-        unit = text[-1]
-        amount = float(text[:-1])
-        if unit == "s":
-            return int(amount)
-        if unit == "m":
-            return int(amount * 60)
-        if unit == "h":
-            return int(amount * 3600)
-    except Exception:
-        return default
-
-    return default
-
-
 # ============================================================================
 # Repository Management Tools
 # ============================================================================
@@ -150,30 +120,17 @@ class HelmAddRepository(MemoryTraceableTool):
                 exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
-                success = await client.add_repository(
+                result = await client.add_repository(
                     name=args['repo_name'],
                     url=args['repo_url'],
                     username=args.get('username'),
                     password=args.get('password'),
                     force_update=True
                 )
-                
-                if success:
-                    result = {
-                        'success': True,
-                        'message': f"Repository '{args['repo_name']}' added/updated successfully",
-                        'exec_id': exec_id
-                    }
-                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
-                    return json.dumps(result, ensure_ascii=False)
-                else:
-                    result = {
-                        'success': False,
-                        'message': f"Failed to add repository '{args['repo_name']}'",
-                        'exec_id': exec_id
-                    }
-                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
-                    return json.dumps(result, ensure_ascii=False)
+                result['exec_id'] = exec_id
+                status = ToolExecStatus.COMPLETED if result['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
                 result = {
                     "success": False,
@@ -234,28 +191,15 @@ class HelmRegistryLogin(MemoryTraceableTool):
                     self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
                     return json.dumps(result, ensure_ascii=False)
                 
-                success = await client.registry_login(
+                result = await client.registry_login(
                     registry=args['registry'],
                     username=username,
                     password=password
                 )
-                
-                if success:
-                    result = {
-                        'success': True,
-                        'message': f"Registry '{args['registry']}' login succeeded",
-                        'exec_id': exec_id
-                    }
-                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
-                    return json.dumps(result, ensure_ascii=False)
-                else:
-                    result = {
-                        'success': False,
-                        'message': f"Registry '{args['registry']}' login failed",
-                        'exec_id': exec_id
-                    }
-                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
-                    return json.dumps(result, ensure_ascii=False)
+                result['exec_id'] = exec_id
+                status = ToolExecStatus.COMPLETED if result['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
                 result = {
                     'success': False,
@@ -293,25 +237,11 @@ class HelmUpdateRepositories(MemoryTraceableTool):
                 exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
-                success = await client.update_repository(args.get('repo_name'))
-                
-                if success:
-                    target = args.get('repo_name') or 'all repositories'
-                    result = {
-                        'success': True,
-                        'message': f"{target} updated successfully",
-                        'exec_id': exec_id
-                    }
-                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
-                    return json.dumps(result, ensure_ascii=False)
-                else:
-                    result = {
-                        'success': False,
-                        'message': "Failed to update repositories",
-                        'exec_id': exec_id
-                    }
-                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
-                    return json.dumps(result, ensure_ascii=False)
+                result = await client.update_repository(args.get('repo_name'))
+                result['exec_id'] = exec_id
+                status = ToolExecStatus.COMPLETED if result['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
                 result = {
                     'success': False,
@@ -388,24 +318,11 @@ class HelmRemoveRepository(MemoryTraceableTool):
                 exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
-                success = await client.remove_repository(args['repo_name'])
-                
-                if success:
-                    result = {
-                        'success': True,
-                        'message': f"Repository '{args['repo_name']}' removed successfully",
-                        'exec_id': exec_id
-                    }
-                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
-                    return json.dumps(result, ensure_ascii=False)
-                else:
-                    result = {
-                        'success': False,
-                        'message': f"Failed to remove repository '{args['repo_name']}'",
-                        'exec_id': exec_id
-                    }
-                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
-                    return json.dumps(result, ensure_ascii=False)
+                result = await client.remove_repository(args['repo_name'])
+                result['exec_id'] = exec_id
+                status = ToolExecStatus.COMPLETED if result['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
                 result = {
                     'success': False,
@@ -625,7 +542,7 @@ class HelmInstall(MemoryTraceableTool):
                 
                 create_ns = args.get('create_namespace', 'true').lower() == 'true'
                 
-                success = await client.install(
+                result = await client.install(
                     release_name=args['release_name'],
                     chart=args['chart'],
                     namespace=args.get('namespace', 'default'),
@@ -634,23 +551,10 @@ class HelmInstall(MemoryTraceableTool):
                     wait=True,
                     version=args.get('version')
                 )
-                
-                if success:
-                    result = {
-                        'success': True,
-                        'message': f"Release '{args['release_name']}' installed successfully",
-                        'exec_id': exec_id
-                    }
-                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
-                    return json.dumps(result, ensure_ascii=False)
-                else:
-                    result = {
-                        'success': False,
-                        'message': f"Failed to install release '{args['release_name']}'",
-                        'exec_id': exec_id
-                    }
-                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
-                    return json.dumps(result, ensure_ascii=False)
+                result['exec_id'] = exec_id
+                status = ToolExecStatus.COMPLETED if result['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
                 result = {
                     'success': False,
@@ -724,7 +628,7 @@ class HelmUpgrade(MemoryTraceableTool):
                 
                 install_flag = args.get('install', 'true').lower() == 'true'
                 
-                success = await client.upgrade(
+                result = await client.upgrade(
                     release_name=args['release_name'],
                     chart=args['chart'],
                     namespace=args.get('namespace', 'default'),
@@ -733,23 +637,10 @@ class HelmUpgrade(MemoryTraceableTool):
                     install=install_flag,
                     version=args.get('version')
                 )
-                
-                if success:
-                    result = {
-                        'success': True,
-                        'message': f"Release '{args['release_name']}' upgraded successfully",
-                        'exec_id': exec_id
-                    }
-                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
-                    return json.dumps(result, ensure_ascii=False)
-                else:
-                    result = {
-                        'success': False,
-                        'message': f"Failed to upgrade release '{args['release_name']}'",
-                        'exec_id': exec_id
-                    }
-                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
-                    return json.dumps(result, ensure_ascii=False)
+                result['exec_id'] = exec_id
+                status = ToolExecStatus.COMPLETED if result['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
                 result = {
                     'success': False,
@@ -1001,29 +892,16 @@ class HelmRollback(MemoryTraceableTool):
                 exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
-                success = await client.rollback(
+                result = await client.rollback(
                     release_name=args['release_name'],
                     revision=int(args['revision']),
                     namespace=args.get('namespace', 'default'),
                     wait=True
                 )
-                
-                if success:
-                    result = {
-                        'success': True,
-                        'message': f"Release '{args['release_name']}' rolled back to revision {args['revision']}",
-                        'exec_id': exec_id
-                    }
-                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
-                    return json.dumps(result, ensure_ascii=False)
-                else:
-                    result = {
-                        'success': False,
-                        'message': f"Failed to rollback release '{args['release_name']}'",
-                        'exec_id': exec_id
-                    }
-                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
-                    return json.dumps(result, ensure_ascii=False)
+                result['exec_id'] = exec_id
+                status = ToolExecStatus.COMPLETED if result['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
                 result = {
                     'success': False,
@@ -1067,28 +945,15 @@ class HelmUninstall(MemoryTraceableTool):
                 exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
-                success = await client.uninstall(
+                result = await client.uninstall(
                     release_name=args['release_name'],
                     namespace=args.get('namespace', 'default'),
                     wait=True
                 )
-                
-                if success:
-                    result = {
-                        'success': True,
-                        'message': f"Release '{args['release_name']}' uninstalled successfully",
-                        'exec_id': exec_id
-                    }
-                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
-                    return json.dumps(result, ensure_ascii=False)
-                else:
-                    result = {
-                        'success': False,
-                        'message': f"Failed to uninstall release '{args['release_name']}'",
-                        'exec_id': exec_id
-                    }
-                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
-                    return json.dumps(result, ensure_ascii=False)
+                result['exec_id'] = exec_id
+                status = ToolExecStatus.COMPLETED if result['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
                 result = {
                     'success': False,
@@ -1133,12 +998,6 @@ class HelmTest(MemoryTraceableTool):
             'description': 'Optional regex filter for selecting specific test hooks',
             'required': False
         },
-        {
-            'name': 'timeout',
-            'type': 'string',
-            'description': 'Optional test timeout (e.g., "5m", "120s")',
-            'required': False
-        },
     ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
@@ -1148,11 +1007,7 @@ class HelmTest(MemoryTraceableTool):
             try:
                 args = parse_params(params)
                 exec_id = self._pre_call(self.tool_name, args)
-                helm_timeout_arg = args.get('timeout')
-                # Keep process timeout slightly above Helm's own timeout to allow
-                # command teardown and stdout collection.
-                client_timeout = parse_duration_seconds(helm_timeout_arg, default=300) + 30
-                client = HelmClient(timeout=client_timeout)
+                client = HelmClient()
 
                 include_logs = parse_bool(args.get('logs'), default=True)
                 result = await client.test(
@@ -1160,7 +1015,7 @@ class HelmTest(MemoryTraceableTool):
                     namespace=args.get('namespace', 'default'),
                     logs=include_logs,
                     filter_pattern=args.get('filter'),
-                    timeout=args.get('timeout')
+                    timeout='120s'
                 )
 
                 if result.get('success'):

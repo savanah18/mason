@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+import os
 import re
 from typing import Dict, List, Tuple
 from dataclasses import dataclass, field
@@ -22,6 +21,10 @@ class WorkflowExecution():
     model_generation_latency: float = None
     task_total_token_cost: int = None
     task_gen_token_cost: int = None
+    agent_type: str = "chat" # personas
+    agent_mode: str = "dev" # prod, eval, dev
+    # prompt reference
+    system_prompt_ref: str = None
 
     def num_function_calls(self):
         return len(self.function_calls)
@@ -43,14 +46,20 @@ class WorkflowExecution():
         except TypeError:
             return None
 
+
+
     def record_workflow_state(self):
         try:
             mem_client = redis.Redis(host="redis", port=6379, decode_responses=True)
             mem_client.hset(
-                f"workflow:{str(self.workflow_id)}",
+                f"workflow:{self.agent_mode}:{self.agent_type}:{str(self.workflow_id)}",
                 mapping={
-                    "session_id": str(self.session_id),
-                    "workflow_id": str(self.workflow_id),
+                    "metadata": json.dumps({
+                        "agent_type": self.agent_type,
+                        "session_id": str(self.session_id),
+                        "workflow_id": str(self.workflow_id),
+                        "agent_mode": self.agent_mode
+                    }),
                     "task": str(self.task),
                     "result": str(self.result),
                     "function_calls": json.dumps(self.function_calls),
@@ -64,7 +73,12 @@ class WorkflowExecution():
                         "model_generation_latency": self.model_generation_latency,
                         "task_total_token_cost": self.task_total_token_cost,
                         "task_gen_token_cost": self.task_gen_token_cost,
+                    }),
+                    "optimization": json.dumps({
+                        "prompt": "UNPROCESSED", # placeholder for future optimization logic
+                        "reference": self.system_prompt_ref, # for potential future use in optimization
                     })
+
                 }
             )
         except Exception as e:
@@ -91,18 +105,20 @@ def process_workflow_execution(
     session_id, 
     workflow_id, 
     task="",  
-    response_messages: List[Dict] = []
+    response_messages: List[Dict] = [],
+    agent_type: str = "chat",
 ) -> WorkflowExecution:
     workflow_exec: WorkflowExecution = WorkflowExecution(
         session_id = session_id,
         workflow_id = workflow_id,
-        task = task
+        task = task,
+        agent_type = agent_type,
     )
     function_called = set()
     num_function_calls = 0
     for message in response_messages:
         if message.get('role') == "assistant": 
-            print("DEBUG!!!!", message)
+            # print("DEBUG!!!!", message)
             if 'function_id' in message.get('extra'):
                 function_called.add(message.get('extra').get('function_id'))
                 workflow_exec.function_calls.append(message)

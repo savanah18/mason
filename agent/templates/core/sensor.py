@@ -64,7 +64,7 @@ class KafkaEventListener(Sensor):
                     "offset": message.offset
                 }
             }
-            print("DEBUG percepts", percept)
+            print("Perceived\n", percept)
             try:
                 yield percept
             finally:

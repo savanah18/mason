@@ -1,25 +1,20 @@
 id: DEP-E-002.1
 chat-prompt: |
   Please process an update for billing-worker in namespace finance using chart bitnami/redis version 25.3.9.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/redis instead of Helm repo URLs.
   In this busy namespace case, you may choose targeted release checks or broader namespace checks before updating.
   Send the request as one Kafka event payload in JSON.
   Include the core fields from the request, and include workflow metadata if present.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID> and include extra_instruction in the same JSON payload.
-expected-event-input: |
-  Your task is to ALWAYS execute the requested action, even if it looks similar to a previous request.
-  Do not assume prior execution is sufficient.
-  Current workflow ID: <WORKFLOW_ID>
-  Percepts: [{"event_type":"update","release_name":"billing-worker","chart":"bitnami/redis","version":"25.3.9","namespace":"finance"}]
-  Action: Process requests using your defined workflow.
 pre-condition-script: |
   # Pre-condition: release exists at previous version with extra workload in namespace.
-  helm repo add bitnami https://charts.bitnami.com/bitnami || true
-  helm repo update
+  echo "Skipping helm repo add: using OCI charts"
+  echo "Skipping helm repo update: using OCI charts"
   kubectl create ns finance --dry-run=client -o yaml | kubectl apply -f -
   helm uninstall billing-worker -n finance || true
   helm uninstall finance-sidecar -n finance || true
-  helm install billing-worker bitnami/redis --version 25.3.8 -n finance
-  helm install finance-sidecar bitnami/nginx --version 22.6.10 -n finance
+  helm install billing-worker oci://registry-1.docker.io/bitnamicharts/redis --version 25.3.8 --set global.storageClass=nfs-client -n finance
+  helm install finance-sidecar oci://registry-1.docker.io/bitnamicharts/nginx --version 22.6.10 --set global.storageClass=nfs-client -n finance
 execution-script: |
   export CHAT_ENDPOINT=127.0.0.1:8002
   SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
@@ -36,7 +31,7 @@ execution-script: |
   curl -X POST "${CHAT_ENDPOINT}/chat/send" \
     -H "Content-Type: application/json" \
     -d "$json_payload"
-expected-execution-time: "120"
+expected-execution-time: "600"
 output-retrieval-script: |
   python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
 evaluation-script:

@@ -37,7 +37,7 @@ class OptimizerUpdateUserPromptTemplate(BaseTool):
                 args = parse_params(params)
                 client = HelmClient()
                 
-                success = await client.add_repository(
+                result = await client.add_repository(
                     name=args['repo_name'],
                     url=args['repo_url'],
                     username=args.get('username'),
@@ -45,16 +45,7 @@ class OptimizerUpdateUserPromptTemplate(BaseTool):
                     force_update=True
                 )
                 
-                if success:
-                    return json5.dumps({
-                        'success': True,
-                        'message': f"Repository '{args['repo_name']}' added/updated successfully"
-                    }, ensure_ascii=False)
-                else:
-                    return json5.dumps({
-                        'success': False,
-                        'message': f"Failed to add repository '{args['repo_name']}'"
-                    }, ensure_ascii=False)
+                return json5.dumps(result, ensure_ascii=False)
             except Exception as e:
                 return json5.dumps({
                     'success': False,

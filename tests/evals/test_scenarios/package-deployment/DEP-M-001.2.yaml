@@ -1,0 +1,39 @@
+id: DEP-M-001.2
+chat-prompt: |
+  Please process a publish request for search-api in namespace search using chart bitnami/postgresql version 18.5.14.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/postgresql instead of Helm repo URLs.
+  A storage dependency issue can occur after install, so you may choose either proactive validation or post-install troubleshooting to reach a stable result.
+  Set global.storageClass=does-not-exist
+  Send the request as one Kafka event payload in JSON.
+  Include the core fields from the request, and include workflow metadata if present.
+  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID> and include extra_instruction in the same JSON payload.
+pre-condition-script: |
+  # Pre-condition: clean namespace before triggering storage-related runtime issue.
+  echo "Skipping helm repo add: using OCI charts"
+  echo "Skipping helm repo update: using OCI charts"
+  kubectl create ns search --dry-run=client -o yaml | kubectl apply -f -
+  helm uninstall search-api -n search || true
+execution-script: |
+  export CHAT_ENDPOINT=127.0.0.1:8002
+  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+
+  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  echo CHAT_PROMPT: ${CHAT_PROMPT}
+  echo SESSION_ID: ${SESSION_ID}
+
+  json_payload=$(jq -n \
+  --arg message "$CHAT_PROMPT" \
+  --arg session_id "$SESSION_ID" \
+  '{message: $message, session_id: $session_id}')
+
+  curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+    -H "Content-Type: application/json" \
+    -d "$json_payload"
+expected-execution-time: "600"
+output-retrieval-script: |
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  helm uninstall search-api -n search || true
+  kubectl delete ns search --ignore-not-found=true

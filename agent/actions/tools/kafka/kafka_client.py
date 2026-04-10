@@ -12,20 +12,23 @@ from kafka import KafkaAdminClient, KafkaProducer
 class KafkaProducerClient:
     """Thin wrapper around kafka-python producer for simple message publish."""
 
-    _shared_clients: dict[tuple[tuple[str, ...], str, int], "KafkaProducerClient"] = {}
+    _shared_clients: dict[tuple[tuple[str, ...], str, int, int], "KafkaProducerClient"] = {}
     _shared_lock = threading.Lock()
 
     def __init__(
         self,
         bootstrap_servers: Iterable[str] | str,
         acks: str = "all",
-        request_timeout_ms: int = 30000,
+        request_timeout_ms: int = 180000,
+        delivery_timeout_ms: int = 360000,
     ) -> None:
         self.bootstrap_servers = self._normalize_bootstrap_servers(bootstrap_servers)
         self.producer = KafkaProducer(
             bootstrap_servers=list(self.bootstrap_servers),
             acks=acks,
             request_timeout_ms=request_timeout_ms,
+            delivery_timeout_ms=delivery_timeout_ms,
+            linger_ms=0,
             value_serializer=self._serialize_value,
             key_serializer=self._serialize_key,
         )
@@ -47,10 +50,11 @@ class KafkaProducerClient:
         cls,
         bootstrap_servers: Iterable[str] | str,
         acks: str = "all",
-        request_timeout_ms: int = 30000,
+        request_timeout_ms: int = 180000,
+        delivery_timeout_ms: int = 360000,
     ) -> "KafkaProducerClient":
         normalized_servers = cls._normalize_bootstrap_servers(bootstrap_servers)
-        cache_key = (normalized_servers, acks, request_timeout_ms)
+        cache_key = (normalized_servers, acks, request_timeout_ms, delivery_timeout_ms)
 
         with cls._shared_lock:
             client = cls._shared_clients.get(cache_key)
@@ -59,6 +63,7 @@ class KafkaProducerClient:
                     bootstrap_servers=list(normalized_servers),
                     acks=acks,
                     request_timeout_ms=request_timeout_ms,
+                    delivery_timeout_ms=delivery_timeout_ms,
                 )
                 cls._shared_clients[cache_key] = client
             return client

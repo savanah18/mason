@@ -1,4 +1,5 @@
 import asyncio
+import importlib.util
 import os
 import uuid
 from pathlib import Path
@@ -8,6 +9,17 @@ import threading
 from typing import Dict, Iterator, List, Literal, Optional, Union, Any
 from datetime import datetime
 
+
+# Memory Managment
+from transformers import AutoTokenizer
+from agent_memory_client import MemoryAPIClient, MemoryClientConfig
+from agent_memory_client.models import WorkingMemory, MemoryMessage
+
+# Agent
+from qwen_agent.agents import Assistant
+from qwen_agent.tools.base import BaseTool, register_tool 
+from qwen_agent.tools.mcp_manager import MCPManager
+from qwen_agent.utils.output_beautify import typewriter_print
 
 from templates.core.autonomous_agent import AutonomousAgent
 from templates.core.base import BaseAgent
@@ -21,6 +33,7 @@ from templates.core.context_compaction import (
     prune_session_history,
     select_context_messages,
 )
+from templates.core.prompt_manager import PromptUpdater
 from templates.core.mcp_compat import apply_mcp_ping_compat_patch
 from templates.core.workflows import (
     process_workflow_execution,
@@ -29,12 +42,9 @@ from templates.core.workflows import (
 
 from templates.memory.management.agent_memory_mixin import MemoryManagementMixin
 
-from qwen_agent.agents import Assistant
-from qwen_agent.tools.base import BaseTool, register_tool 
-from qwen_agent.tools.mcp_manager import MCPManager
-from qwen_agent.utils.output_beautify import typewriter_print
-
+# TODO create a function instead
 PERSONA = os.getenv("PERSONA","deployer")
+AGENT_MODE = os.getenv("AGENT_MODE","prod")
 
 # Tools
 from actions.tools.helm.tools import (
@@ -67,6 +77,23 @@ from actions.tools.kubernetes.tools import (
 )
 
 
+def _load_prompt_optimization_tools():
+    """Load prompt optimization tools from a hyphenated path via importlib."""
+    tool_path = Path(__file__).resolve().parent / "actions" / "tools" / "prompt-optimizaiton" / "tools.py"
+    if not tool_path.exists():
+        return
+
+    spec = importlib.util.spec_from_file_location("actions.tools.prompt_optimizaiton.tools", tool_path)
+    if spec is None or spec.loader is None:
+        return
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+
+_load_prompt_optimization_tools()
+
+
 class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryManagementMixin):
     def __init__(
         self,
@@ -86,6 +113,10 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         # goals
         if isinstance(goal, str) or isinstance(goal, Path):
             goal: Goal = self._initialize_goal(goal)
+
+        prompt_updater = PromptUpdater()
+        self.system_prompt_status = prompt_updater.update_system_prompt_with_status(PERSONA)
+        print(f"[PromptUpdater] update_system_prompt(persona={PERSONA}) -> {self.system_prompt_status}")
 
         # sensory tools
         if isinstance(sensors, str) or isinstance(sensors, Path):
@@ -123,7 +154,6 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         print("Initializing agent with the following system prompt")
         print("*"*20)
         print(f"{goal.description}")
-        print(f"Agent has the following tools in its arsenal {mcp_tools + function_tools}")
 
     @staticmethod
     def _apply_mcp_ping_compat_patch():
@@ -154,8 +184,11 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
                 Action: {self.goal.base_prompt}
             """
         }
+        print(prompt)
 
-        _, session = await self.get_session(self.session_id)
+        # Use a deterministic session per workflow to avoid cross-task history bleed.
+        session_id = f"{PERSONA}:{workflow_id}"
+        _, session = await self.get_session(session_id)
         session : WorkingMemory
 
         # Add user message to history
@@ -174,18 +207,19 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
             gen_time = datetime.now()
             for response in self.run(messages=messages):
                 tmp = typewriter_print(response, tmp)
+                # print("iterator response", type(response), response)
             gen_latency = datetime.now() - gen_time
 
             structured_responses = response
-            # TODO TEST Measure task codes (tokens)
+            # Measure total task cost (tokens)
             # ---> system prompt + history + user prompt + tool call/response + final answer
             to_compute_tokens = [{"role": "system", "content": self.goal.description }] + messages + structured_responses
             task_total_token_cost = self.compute_total_tokens(to_compute_tokens)
-            # TODO (exclude tooling input tokens from structured response)
-            task_gen_token_cost = self.compute_total_tokens(structured_responses)
+            # Measure token cost for just the answer generation (system prompt + user prompt + history that goes into context + final answer, excluding tool calls and their responses)
+            assistant_responses = [r for r in structured_responses if r['role']=='assistant' ]
+            task_gen_token_cost = self.compute_total_tokens(assistant_responses)
 
             assistant_response = response[-1]['content'] # Most workflow agent answer are now in markdown format. 
-            # print(structured_responses)
         except Exception as e:
             assistant_response = f"Error: {type(e)} {str(e)}"
         #****************** END OF WORKFLOW ******************
@@ -193,19 +227,23 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
 
         #****************** START OF WORKFLOW STATS AND TRACEABILITY ******************
         # Determine if tools called have response, record tool execcution details for evaluations
+        print("Processing workflow")
         workflow_exec  = process_workflow_execution(
-            session_id = self.session_id, 
+            session_id = session_id,
             workflow_id = workflow_id,
             task = prompt['content'], 
-            response_messages = structured_responses
+            response_messages = structured_responses,
+            agent_type = PERSONA,
         )
-        # TODO add token cost, latency, etc. and record
+        # TODO add token cost, latency, etc. in record
         workflow_exec.task_total_token_cost = task_total_token_cost
         workflow_exec.task_gen_token_cost = task_gen_token_cost
-        workflow_exec.model_generation_latency = gen_latency.seconds + gen_latency.microseconds/1e6
+        # workflow_exec.model_generation_latency = gen_latency.seconds + gen_latency.microseconds/1e6
         workflow_exec.workflow_latency = workflow_latency.seconds + workflow_latency.microseconds/1e6
+        workflow_exec.system_prompt_ref = self.system_prompt_status.get("latest_key", None) if self.system_prompt_status else None
 
         # record 
+        print("Recording workflow state")
         workflow_exec.record_workflow_state()
         #****************** END OF WORKFLOW STATS AND TRACEABILITY ******************
 
@@ -217,12 +255,14 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
 
 
         #****************** START OF HISTORIZATION ******************
+        print("Historization")
         # Add assistant responses to history
         if structured_responses:
-            session.messages.extend(structured_responses[-1:]) #final answer only
+            memory_msgs = [MemoryMessage(role=sr['role'],content=sr['content']) for sr  in structured_responses[-1:]]
+            session.messages.extend(memory_msgs) #final answer only
 
         await self.memory_client.put_working_memory(
-            session_id = self.session_id,
+            session_id = session_id,
             memory = session
         )
         #****************** END OF HISTORIZATION ******************
@@ -235,7 +275,7 @@ async def main():
         actuators = f"./personas/{PERSONA}/actuators.yaml",
         prune_intermediate_task_contexts = True
     )
-    agent.session_id = await agent.create_session(PERSONA)
+    # agent.session_id = await agent.create_session(PERSONA)
     await agent.launch()
 
 if __name__ == "__main__":

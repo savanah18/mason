@@ -26,6 +26,12 @@ x-gpu-resources: &gpu-resources
             count: 1
             capabilities: [gpu]
 
+x-common-agent-env: &common-agent-env
+  OCI_REGISTRY_SECRET: /run/secrets/oci-registry
+  KAFKA_BOOTSTRAP_SERVERS: kafka-server:9092
+  KUBECONFIG: /run/secrets/kubernetes-config
+  AGENT_MODE: ${AGENT_MODE:-dev} # eval, prod, dev
+
 x-prometheus-env: &prometheus-env
   PROMETHEUS_URL: ${PROMETHEUS_URL}
 
@@ -125,9 +131,7 @@ services:
     - oci-registry 
     - kubernetes-config
     environment: 
-      OCI_REGISTRY_SECRET: /run/secrets/oci-registry
-      KAFKA_BOOTSTRAP_SERVERS: kafka-server:9092
-      KUBECONFIG: /run/secrets/kubernetes-config
+      <<: *common-agent-env
       PERSONA: deployer
     volumes:
     - ./agent/personas:/app/personas:rw
@@ -147,7 +151,7 @@ services:
       #   condition: service_healthy
       kubernetes-mcp-server:
         condition: service_healthy
-    # restart: unless-stopped
+    restart: unless-stopped
 
   resiliency-optimizer-agent:
     profiles: ["agent", "standard"]
@@ -157,11 +161,10 @@ services:
     - oci-registry 
     - kubernetes-config
     environment: 
-      OCI_REGISTRY_SECRET: /run/secrets/oci-registry
-      KAFKA_BOOTSTRAP_SERVERS: kafka-server:9092
-      KUBECONFIG: /run/secrets/kubernetes-config
       PERSONA: resiliency-optimizer
-      <<: *prometheus-env
+      <<: 
+      - *common-agent-env
+      - *prometheus-env
     volumes:
     - ./agent/personas:/app/personas:rw
     - ./agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw # for dev purposes only
@@ -180,7 +183,7 @@ services:
       #   condition: service_healthy
       kubernetes-mcp-server:
         condition: service_healthy
-    # restart: unless-stopped
+    restart: unless-stopped
 
   chat-agent:
     profiles: ["agent", "standard"]
@@ -190,10 +193,10 @@ services:
     - oci-registry 
     - kubernetes-config
     environment: 
-      OCI_REGISTRY_SECRET: /run/secrets/oci-registry
-      KAFKA_BOOTSTRAP_SERVERS: kafka-server:9092
-      KUBECONFIG: /run/secrets/kubernetes-config
-      <<: *prometheus-env
+      PERSONA: chat
+      <<: 
+      - *common-agent-env
+      - *prometheus-env
     volumes:
     - ./agent/personas:/app/personas:rw
     - ./agent/qwen-chat-agent.py:/app/qwen-chat-agent.py:rw # for dev purposes only
@@ -214,6 +217,31 @@ services:
       #   condition: service_healthy
       kubernetes-mcp-server:
         condition: service_healthy
+
+  prompt-optimizer-agent:
+    profiles: ["agent", "experimental"]
+    image: agent-generic:latest
+    container_name: prompt-optimizer-agent
+    environment: 
+      PERSONA: prompt-optimizer
+      <<: *common-agent-env
+    volumes:
+    - ./agent/personas:/app/personas:rw
+    - ./agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw # for dev purposes only
+    - ./agent/templates:/app/templates:rw
+    - ./agent/actions/:/app/actions:rw
+    - ./agent/memory/:/app/memory:rw
+    - /root/workspace/lnd/aiops/vlm/Qwen/Qwen3-4B-Instruct-2507:/mnt/checkpoint:ro
+    command: >
+      python -u qwen-ops-agent.py 
+    networks:
+      - triton-ai-network
+    depends_on:
+      kafka-server:
+        condition: service_started
+      kubernetes-mcp-server:
+        condition: service_healthy
+    restart: unless-stopped
 
   # MCP and other tools
   kubernetes-mcp-server:

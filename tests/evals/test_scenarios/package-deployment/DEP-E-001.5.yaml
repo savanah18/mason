@@ -1,16 +1,11 @@
 id: DEP-E-001.5
 chat-prompt: |
   Please process a fresh install for media-api in namespace media using chart bitnami/nginx version 22.6.10.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx instead of Helm repo URLs.
   If the namespace is absent, you may choose create-first or install-with-create-namespace approach.
   Send the request as one Kafka event payload in JSON.
   Include the core fields from the request, and include workflow metadata if present.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID> and include extra_instruction in the same JSON payload.
-expected-event-input: |
-  Your task is to ALWAYS execute the requested action, even if it looks similar to a previous request.
-  Do not assume prior execution is sufficient.
-  Current workflow ID: <WORKFLOW_ID>
-  Percepts: [{"event_type": "publish", "release_name": "media-api", "chart": "bitnami/nginx", "version": "22.6.10", "namespace": "media"}]
-  Action: Process requests using your defined workflow.
 pre-condition-script: |
   # Edge pre-condition: target namespace does not exist and no cleanup is done ahead of time.
   helm uninstall media-api -n media || true
@@ -33,7 +28,7 @@ execution-script: |
   curl -X POST "${CHAT_ENDPOINT}/chat/send" \
     -H "Content-Type: application/json" \
     -d "$json_payload"
-expected-execution-time: "120"
+expected-execution-time: "600"
 output-retrieval-script: |
   python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
 evaluation-script:

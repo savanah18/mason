@@ -19,7 +19,7 @@ class BaseAgent:
                 'model': 'Qwen3-4B-Instruct',
                 'model_server': os.getenv('LLM_SERVER', 'http://localhost:8001/v1'),
                 'generate_cfg': {
-                    "temperature": 0.8,
+                    "temperature": 0.1 if os.getenv("AGENT_MODE","dev") == "eval" else 0.8,
                     "top_p": 0.9,
                     "repetition_penalty": 1.1        
                 }
@@ -58,6 +58,9 @@ class BaseAgent:
                 result["tools"] = MCPManager().initConfig(mcp_config)
                 result["tools"] = [t for t in result["tools"] if t.name not in exclude_tools]
                 print(f"✓ Loaded {len(result['tools'])} MCP tools")
+                print("Available tools:")
+                for tool in result["tools"]:
+                    print(f"  - {tool.name}")
             except Exception as e:
                 result["error"] = e
                 print(f"⚠ Warning: Failed to initialize MCP servers: {e}")
@@ -82,5 +85,5 @@ class BaseAgent:
         tokenizer = AutoTokenizer.from_pretrained("/mnt/checkpoint")
         # print(f"Computing context length for  {messages}")
         total_tokens = sum(len(tokenizer.encode(msg["content"])) for msg in messages)
-        print("Total tokens:\t ", total_tokens)
+        # print("Total tokens:\t ", total_tokens)
         return total_tokens

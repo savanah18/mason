@@ -20,6 +20,7 @@ requests==2.32.5
 # Configuration and serialization
 PyYAML==6.0.3
 kafka-python==2.3.0
+google-genai==0.8.0
 
 # Triton Inference Client
 tritonclient==2.64.0         # NVIDIA Triton Inference Server client

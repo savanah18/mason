@@ -1,0 +1,17 @@
+apiVersion: agents/v1
+kind: Actuators
+metadata:
+  name: prompt-optimizer-actuators
+  labels:
+    app: prompt-optimizer-actuators
+    type: autonomous
+spec:
+  mcp-servers:
+    mcp-time:
+      type: "stdio"
+      args: []
+      command: "/app/actions/mcp/servers/time/mcp-time"
+  builtin-functions:
+    - "prompt-optimization-retrieve-workflow-results"
+    - "prompt-update"
+  exclude-tools: []
