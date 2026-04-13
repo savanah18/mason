@@ -1,7 +1,7 @@
 id: DEP-E-004.0
 chat-prompt: |
   Please process a publish request for analytics-service in namespace analytics using chart bitnami/elasticsearch version 22.1.1.
-  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/elasticsearch instead of Helm repo URLs.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/elasticsearch .
   You may choose either explicit namespace verification or proactive namespace setup before deployment.
   Set global.storageClass=nfs-client
   Send the request as one Kafka event payload in JSON.
@@ -31,7 +31,8 @@ execution-script: |
     -d "$json_payload"
 expected-execution-time: "600"
 output-retrieval-script: |
-  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
+  PERSONA=chat
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} $PERSONA
 evaluation-script:
   echo TODO evaluation script with LLM as a judge
 post-condition-script: |

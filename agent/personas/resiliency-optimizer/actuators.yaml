@@ -26,9 +26,9 @@ spec:
   builtin-functions:
   - "helm-template"
   - "helm-list-releases"
-  - "helm-get-values"
-  - "helm-upgrade"
-  - "helm-rollback"
+  # - "helm-get-values"
+  # - "helm-upgrade"
+  # - "helm-rollback"
   - "helm-test"
   - "kafka-produce-message"
   - "resource-collector"

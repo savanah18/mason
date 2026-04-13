@@ -12,7 +12,11 @@ def safe_deserializer(m):
     if not m:
         return None
     try:
-        return json.loads(m.decode("utf-8"))
+        parsed = json.loads(m.decode("utf-8"))
+        if not isinstance(parsed, dict):
+            print("Skipping non-object JSON:", parsed)
+            return None
+        return parsed
     except json.JSONDecodeError:
         print("Skipping invalid JSON:", m)
         return None
@@ -50,11 +54,10 @@ class KafkaEventListener(Sensor):
             
             # Handle None or invalid messages
             if not raw_event:
-                print("Skipping empty message")
+                print("Skipping empty or invalid message")
                 continue
                 
             percept = {
-                "type": raw_event.get("event_type", raw_event.get("event")),
                 "source": "kafka",
                 "data": raw_event,
                 "timestamp": message.timestamp,

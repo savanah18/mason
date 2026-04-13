@@ -3,6 +3,7 @@ chat-prompt: |
   Ad-hoc request: show a compact workload inventory for media-microservices namespace.
   Return deployment/statefulset/daemonset counts and key cpu/memory settings.
   Constraint: use exactly 1 related tool call.
+  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
   # Pre-condition: media-microservices namespace should be available.
   kubectl get ns media-microservices || kubectl create ns media-microservices
@@ -17,14 +18,16 @@ execution-script: |
   json_payload=$(jq -n \
   --arg message "$CHAT_PROMPT" \
   --arg session_id "$SESSION_ID" \
-  '{message: $message, session_id: $session_id}')
+  --arg workflow_id "$WORKFLOW_ID" \
+  '{message: $message, session_id: $session_id, workflow_id: $workflow_id}')
 
   curl -X POST "${CHAT_ENDPOINT}/chat/send" \
     -H "Content-Type: application/json" \
     -d "$json_payload"
 expected-execution-time: "600"
 output-retrieval-script: |
-  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
+  PERSONA=chat
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
 evaluation-script:
   echo TODO evaluation script with LLM as a judge
 post-condition-script: |

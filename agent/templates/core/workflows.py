@@ -20,7 +20,9 @@ class WorkflowExecution():
     workflow_latency: float = None
     model_generation_latency: float = None
     task_total_token_cost: int = None
+    task_prompt_token_cost: int = None
     task_gen_token_cost: int = None
+    ttft: float = None
     agent_type: str = "chat" # personas
     agent_mode: str = "dev" # prod, eval, dev
     # prompt reference
@@ -72,7 +74,9 @@ class WorkflowExecution():
                         "workflow_latency": self.workflow_latency,
                         "model_generation_latency": self.model_generation_latency,
                         "task_total_token_cost": self.task_total_token_cost,
+                        "task_prompt_token_cost": self.task_prompt_token_cost,
                         "task_gen_token_cost": self.task_gen_token_cost,
+                        "ttft": self.ttft,
                     }),
                     "optimization": json.dumps({
                         "prompt": "UNPROCESSED", # placeholder for future optimization logic

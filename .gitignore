@@ -53,3 +53,7 @@ agent/memory/**
 
 # Secrest
 *.secrets/**
+
+# 
+tests/evals/*.json
+evaluator/batch_results

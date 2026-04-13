@@ -1,7 +1,7 @@
 id: DEP-M-001.2
 chat-prompt: |
-  Please process a publish request for search-api in namespace search using chart bitnami/postgresql version 18.5.14.
-  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/postgresql instead of Helm repo URLs.
+  Please process a publish request for search-api in namespace search.
+  Use OCI registry chart reference 'oci://registry-1.docker.io/bitnamicharts/postgresql' version 18.5.14.
   A storage dependency issue can occur after install, so you may choose either proactive validation or post-install troubleshooting to reach a stable result.
   Set global.storageClass=does-not-exist
   Send the request as one Kafka event payload in JSON.
@@ -31,7 +31,8 @@ execution-script: |
     -d "$json_payload"
 expected-execution-time: "600"
 output-retrieval-script: |
-  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
 evaluation-script:
   echo TODO evaluation script with LLM as a judge
 post-condition-script: |

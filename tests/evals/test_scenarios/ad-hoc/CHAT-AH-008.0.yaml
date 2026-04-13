@@ -1,14 +1,14 @@
-id: CHAT-AH-005.0
+id: CHAT-AH-008.0
 chat-prompt: |
-  Ad-hoc request: use kubernetes-mcp-server to verify nginx-web-server deployment readiness,
-  then cross-check compact workload data using builtin tools for media-microservices namespace.
-  Constraint: use up to 2 related tool calls.
+  Ad-hoc request: collect a compact 5 minute resource snapshot for workloads in media-microservices namespace.
+  Use resource-collector first if available, keep the request namespace-scoped, and avoid complex multi-stage queries.
+  Summarize only the top resource consumers, namespace-level resource settings, and any notable anomalies.
+  Constraint: use exactly 1 related tool call.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
-  # Pre-condition: namespace must be available for MCP readiness checks.
+  # Pre-condition: namespace should exist and workloads should be present.
   kubectl get ns media-microservices || kubectl create ns media-microservices
-  # Assumption: kubernetes-mcp-server endpoint is reachable in runtime.
-  echo "Assume kubernetes-mcp-server is available for this scenario."
+  kubectl get deploy -n media-microservices --no-headers | wc -l
 execution-script: |
   export CHAT_ENDPOINT=127.0.0.1:8002
   SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
@@ -33,5 +33,5 @@ output-retrieval-script: |
 evaluation-script:
   echo TODO evaluation script with LLM as a judge
 post-condition-script: |
-  # No cleanup required for cross-check scenario.
+  # Read-only resource collection scenario.
   true

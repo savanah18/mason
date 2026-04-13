@@ -661,7 +661,7 @@ class KubernetesApplyResourceUpdate(MemoryTraceableTool):
         except Exception as exc:
             output = {
                 "success": False,
-                "error": str(e),
+                "error": str(exc),
                 "exec_id": exec_id
             }
             self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)

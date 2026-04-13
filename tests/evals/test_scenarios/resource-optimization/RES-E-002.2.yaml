@@ -1,7 +1,7 @@
 id: RES-E-002.2
 chat-prompt: |
   Please optimize resources for the media-microservices service in media-microservices namespace.
-  This environment has namespace-level resource quotas with moderate CPU and memory allocations (8 CPU, 8 GB RAM).
+  This environment has namespace-level resource quotas: (8-16 CPU, 8-16 GB RAM).
   Run performance benchmarks, collect metrics against targets (avg latency ≤100ms, p90 latency ≤200ms, success ≥99%), and recommend resource allocations respecting quota constraints.
   Send the optimization request to Kafka topic tests.normal as one JSON event payload.
   Include release name and namespace (media-microservices) in the payload.
@@ -14,7 +14,7 @@ pre-condition-script: |
   apiVersion: v1
   kind: ResourceQuota
   metadata:
-    name: media-microservices-quota-moderate
+    name: media-microservices-quota
     namespace: media-microservices
   spec:
     hard:
@@ -23,13 +23,19 @@ pre-condition-script: |
       limits.cpu: "16"
       limits.memory: "16Gi"
   EOF
-  # Scale all deployments to 1 replica with no resource restrictions
   for deploy in $(kubectl get deployments -n media-microservices --no-headers | awk '{print $1}'); do
     kubectl patch deployment "$deploy" -n media-microservices --type='json' \
       -p='[{"op": "replace", "path": "/spec/replicas", "value":1}]' || true
     kubectl patch deployment "$deploy" -n media-microservices --type='json' \
       -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/resources", "value":{}}]' || true
   done
+  
+  sleep 5
+  kubectl patch deployment user-review-service -n media-microservices --type='json' \
+      -p='[{"op": "replace", "path": "/spec/replicas", "value":3}]' || true
+  # kubectl patch deployment nginx-web-server -n media-microservices --type='json' \
+  #     -p='[{"op": "replace", "path": "/spec/replicas", "value":2}]' || true
+  sleep 10
 execution-script: |
   export CHAT_ENDPOINT=127.0.0.1:8002
   SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
@@ -48,9 +54,10 @@ execution-script: |
     -d "$json_payload"
 expected-execution-time: "600"
 output-retrieval-script: |
-  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
+  PERSONA=resiliency-optimizer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
 evaluation-script:
   echo TODO evaluation script with LLM as a judge
 post-condition-script: |
   # Cleanup: Optionally remove moderate resource quota; preserve media-microservices namespace and running services
-  kubectl delete resourcequota media-microservices-quota-moderate -n media-microservices --ignore-not-found=true
+  kubectl delete resourcequota media-microservices-quota -n media-microservices --ignore-not-found=true

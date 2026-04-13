@@ -1,14 +1,13 @@
-id: CHAT-AH-005.0
+id: CHAT-AH-007.0
 chat-prompt: |
-  Ad-hoc request: use kubernetes-mcp-server to verify nginx-web-server deployment readiness,
-  then cross-check compact workload data using builtin tools for media-microservices namespace.
+  Ad-hoc request: inspect the current Helm release state for victoria-metrics namespace.
+  Use helm-list-releases first, then helm-get-values for the victoria-metrics release if present.
+  Return a concise summary of the release status and whether resource values are set.
   Constraint: use up to 2 related tool calls.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
-  # Pre-condition: namespace must be available for MCP readiness checks.
-  kubectl get ns media-microservices || kubectl create ns media-microservices
-  # Assumption: kubernetes-mcp-server endpoint is reachable in runtime.
-  echo "Assume kubernetes-mcp-server is available for this scenario."
+  # Pre-condition: namespace should exist and release may or may not be present.
+  kubectl get ns victoria-metrics || kubectl create ns victoria-metrics
 execution-script: |
   export CHAT_ENDPOINT=127.0.0.1:8002
   SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
@@ -33,5 +32,5 @@ output-retrieval-script: |
 evaluation-script:
   echo TODO evaluation script with LLM as a judge
 post-condition-script: |
-  # No cleanup required for cross-check scenario.
+  # No cleanup required for read-only Helm inspection scenario.
   true

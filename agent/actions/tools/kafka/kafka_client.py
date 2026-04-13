@@ -82,9 +82,9 @@ class KafkaProducerClient:
 
     @staticmethod
     def _serialize_value(value: Any) -> bytes:
-        if isinstance(value, (dict, list)):
-            return json.dumps(value).encode("utf-8")
-        return str(value).encode("utf-8")
+        if not isinstance(value, dict):
+            raise TypeError("Kafka message value must be a dictionary object")
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
     @staticmethod
     def _serialize_key(value: Optional[str]) -> Optional[bytes]:
@@ -95,11 +95,14 @@ class KafkaProducerClient:
     def send_message(
         self,
         topic: str,
-        message: Any,
+        message: Dict[str, Any],
         key: Optional[str] = None,
         headers: Optional[Dict[str, str]] = None,
         wait_timeout_sec: float = 10.0,
     ) -> Dict[str, Any]:
+        if not isinstance(message, dict):
+            raise TypeError("message must be a dictionary object")
+
         kafka_headers = None
         if headers:
             kafka_headers = [

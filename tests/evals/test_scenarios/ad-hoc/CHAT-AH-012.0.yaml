@@ -1,14 +1,16 @@
-id: CHAT-AH-005.0
+id: CHAT-AH-012.0
 chat-prompt: |
-  Ad-hoc request: use kubernetes-mcp-server to verify nginx-web-server deployment readiness,
-  then cross-check compact workload data using builtin tools for media-microservices namespace.
-  Constraint: use up to 2 related tool calls.
+  Ad-hoc request: perform one bounded right-size change for a deployment in namespace search.
+  Use kubernetes-list-workloads to pick a target, take one simple namespace-scoped resource snapshot,
+  apply a minimal cpu/memory update using kubernetes-apply-resource-update,
+  then send one completion event to Kafka topic tests.normal with workflow metadata if injected.
+  Avoid complex metrics queries; prefer a compact snapshot and a short justification for the chosen target.
+  Constraint: use up to 3 related tool calls.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
-  # Pre-condition: namespace must be available for MCP readiness checks.
-  kubectl get ns media-microservices || kubectl create ns media-microservices
-  # Assumption: kubernetes-mcp-server endpoint is reachable in runtime.
-  echo "Assume kubernetes-mcp-server is available for this scenario."
+  # Pre-condition: search namespace should exist and workloads should be available.
+  kubectl get ns search || kubectl create ns search
+  kubectl get deploy -n search --no-headers | wc -l
 execution-script: |
   export CHAT_ENDPOINT=127.0.0.1:8002
   SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
@@ -33,5 +35,5 @@ output-retrieval-script: |
 evaluation-script:
   echo TODO evaluation script with LLM as a judge
 post-condition-script: |
-  # No cleanup required for cross-check scenario.
+  # Cleanup intentionally omitted; scenario validates bounded mutation and eventing.
   true

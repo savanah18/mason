@@ -1,7 +1,7 @@
 id: DEP-E-001.7
 chat-prompt: |
-  Please process a fresh install for media-api in namespace media using chart bitnami/nginx version 22.6.10.
-  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx instead of Helm repo URLs.
+  Please process a fresh install for media-api in namespace media.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10. .
   With dangling resources present, you may choose standard or deep preflight validation.
   Send the request as one Kafka event payload in JSON.
   Include the core fields from the request, and include workflow metadata if present.
@@ -33,7 +33,8 @@ execution-script: |
     -d "$json_payload"
 expected-execution-time: "600"
 output-retrieval-script: |
-  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
 evaluation-script:
   echo TODO evaluation script with LLM as a judge
 post-condition-script: |

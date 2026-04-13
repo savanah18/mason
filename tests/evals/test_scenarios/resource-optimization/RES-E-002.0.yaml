@@ -9,6 +9,7 @@ chat-prompt: |
 pre-condition-script: |
   # Pre-condition: Verify media-microservices namespace with tight resource quotas, no pod-level restrictions.
   kubectl get ns media-microservices || kubectl create ns media-microservices
+  kubectl delete resourcequota media-microservices-quota
   # Apply namespace-level quota only (no pod-level resources)
   kubectl apply -f - <<EOF
   apiVersion: v1
@@ -20,8 +21,8 @@ pre-condition-script: |
     hard:
       requests.cpu: "2"
       requests.memory: "2Gi"
-      limits.cpu: "4"
-      limits.memory: "4Gi"
+      limits.cpu: "8"
+      limits.memory: "8Gi"
   EOF
   # Scale all deployments to 1 replica with no resource restrictions
   for deploy in $(kubectl get deployments -n media-microservices --no-headers | awk '{print $1}'); do
@@ -30,6 +31,14 @@ pre-condition-script: |
     kubectl patch deployment "$deploy" -n media-microservices --type='json' \
       -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/resources", "value":{}}]' || true
   done
+  
+  sleep 5
+  kubectl patch deployment user-review-service -n media-microservices --type='json' \
+      -p='[{"op": "replace", "path": "/spec/replicas", "value":3}]' || true
+  # kubectl patch deployment nginx-web-server -n media-microservices --type='json' \
+  #     -p='[{"op": "replace", "path": "/spec/replicas", "value":2}]' || true
+  kubectl rollout restart deploy
+  sleep 30
 execution-script: |
   export CHAT_ENDPOINT=127.0.0.1:8002
   SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
@@ -48,7 +57,8 @@ execution-script: |
     -d "$json_payload"
 expected-execution-time: "600"
 output-retrieval-script: |
-  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
+  PERSONA=resiliency-optimizer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
 evaluation-script:
   echo TODO evaluation script with LLM as a judge
 post-condition-script: |

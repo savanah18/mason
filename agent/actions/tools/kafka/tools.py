@@ -35,6 +35,7 @@ def _bootstrap_servers_from_args(args: Dict[str, Any]) -> str | list[str]:
 @register_tool("kafka-produce-message")
 class KafkaProduceMessage(MemoryTraceableTool):
     """Publish a message to Kafka topic."""
+
     tool_name = "kafka-produce-message"
 
     description = (
@@ -50,8 +51,21 @@ class KafkaProduceMessage(MemoryTraceableTool):
         },
         {
             "name": "message",
-            "type": "string",
-            "description": "Message payload. Can be plain text or JSON string.",
+            "type": "object",
+            "description": "Full JSON payload for the Kafka message.",
+            # "properties": {
+            #     "workflow_id": {
+            #         "type": "string",
+            #         "description": "Required workflow ID to associate with the message for traceability.",
+            #         "required": True,
+            #     },
+            #     "event_type": {
+            #         "type": "string",
+            #         "description": "Event type for the message, used for traceability.",
+            #         "required": False,
+            #     },
+
+            # },
             "required": True,
         },
         {
@@ -59,7 +73,7 @@ class KafkaProduceMessage(MemoryTraceableTool):
             "type": "number",
             "description": "Delivery wait timeout in seconds (default: 10)",
             "required": False,
-        }
+        },
     ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
@@ -68,10 +82,16 @@ class KafkaProduceMessage(MemoryTraceableTool):
         try:
             args = _parse_params(params)
             exec_id = self._pre_call(self.tool_name, args)
-            
+
             topic = args["topic"]
+            if not isinstance(topic, str) or not topic.strip():
+                raise ValueError("topic must be a non-empty string")
+
+            # message = _coerce_message_object(args["message"])
             message = args["message"]
-            execution_id = args.get("workflow_id")
+            if not isinstance(message, dict):
+                raise ValueError("message must be a dictionary object")
+
             wait_timeout_sec = float(args.get("wait_timeout_sec", 10))
             client = KafkaProducerClient.get_shared_client(
                 bootstrap_servers=_bootstrap_servers_from_args(args),
@@ -87,7 +107,7 @@ class KafkaProduceMessage(MemoryTraceableTool):
                 "success": True,
                 "message": "Kafka message published",
                 "metadata": metadata,
-                "exec_id": exec_id
+                "exec_id": exec_id,
             }
 
             self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
@@ -96,7 +116,7 @@ class KafkaProduceMessage(MemoryTraceableTool):
             result = {
                 "success": False,
                 "error": str(e),
-                "exec_id": exec_id
+                "exec_id": exec_id,
             }
             self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
             return json.dumps(result, ensure_ascii=False)

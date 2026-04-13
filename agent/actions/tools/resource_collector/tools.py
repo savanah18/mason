@@ -47,7 +47,10 @@ class ResourceCollector(MemoryTraceableTool):
     tool_name = "resource-collector"
 
     description = (
-        "Run a PromQL query against Prometheus or VictoriaMetrics and return the raw result set."
+        """
+        Run a PromQL query against Prometheus or VictoriaMetrics and return the raw result set.
+        Tool for collecting resource usage metrics(i.e. cpu, memory) to inform downstream decision-making. 
+        """
     )
 
     parameters = [

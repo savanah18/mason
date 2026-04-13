@@ -78,13 +78,29 @@ def find_matching_scenarios(regex_prefix: str):
 def main(argv):
     if len(argv) < 2:
         print(
-            "Usage: python test_runner.py <workflow.yaml>\n"
-            "   or: python test_runner.py --regex-prefix <regex_prefix>"
+            "Usage: python test_runner.py <workflow.yaml> [--test-id <test_id>]\n"
+            "   or: python test_runner.py --regex-prefix <regex_prefix> [--test-id <test_id>]"
         )
         return 1
 
+    args = argv[1:]
+    test_id = None
+
+    if "--test-id" in args:
+        idx = args.index("--test-id")
+        if idx + 1 >= len(args):
+            print("Missing value for --test-id")
+            return 1
+        test_id = args[idx + 1]
+        del args[idx:idx + 2]
+
+    if not args:
+        print("Missing workflow file or --regex-prefix")
+        return 1
+
     # Generate test ID and date for this test run
-    test_id = str(uuid.uuid4())
+    if not test_id:
+        test_id = str(uuid.uuid4())
     date_str = datetime.now().strftime("%Y%m%d")
     workflow_ids = []
     
@@ -95,12 +111,12 @@ def main(argv):
     # Create empty metadata file
     metadata_file.touch()
 
-    if argv[1] == "--regex-prefix":
-        if len(argv) < 3:
+    if args[0] == "--regex-prefix":
+        if len(args) < 2:
             print("Missing value for --regex-prefix")
             return 1
 
-        regex_prefix = argv[2]
+        regex_prefix = args[1]
         scenario_files = find_matching_scenarios(regex_prefix)
         if not scenario_files:
             print(f"No scenario files matched prefix regex: {regex_prefix}")
@@ -125,7 +141,7 @@ def main(argv):
         return 1 if failures else 0
 
     # Single workflow run
-    run_workflow(argv[1], test_id, date_str, workflow_ids, metadata_file)
+    run_workflow(args[0], test_id, date_str, workflow_ids, metadata_file)
     
     print(f"Test ID: {test_id}")
     print(f"Results saved to: {metadata_dir}")

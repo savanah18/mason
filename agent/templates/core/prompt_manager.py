@@ -73,8 +73,15 @@ class PromptUpdater:
 			latest_key = f"system-prompts:{persona}:latest"
 			historized_key = f"system-prompts:{persona}:{self._now_key_suffix()}"
 
-			existing_prompt = client.hgetall(latest_key)
-			if existing_prompt is None:
+			try:
+				existing_prompt = client.hgetall(latest_key)
+				print(f"[PromptUpdater] Fetched existing prompt for persona={persona}")
+			except Exception as exc:
+				print(f"[PromptUpdater] Error fetching existing prompt for persona={persona}: {exc}")
+				# existing_prompt = None
+
+			if not existing_prompt.get("prompt"):
+				print("DEBUG", latest_key, historized_key)
 				mapping = {
 					"prompt": current_prompt,
 					"metadata": json.dumps({
@@ -120,7 +127,7 @@ class PromptUpdater:
 				"updated": False,
 				"reason": "no-change",
 				"persona": persona,
-				"latest_key": existing_prompt["prompt"]["metadata"]["created_at"] if "metadata" in existing_prompt else None,
+				"latest_key": json.loads(existing_prompt["metadata"])["created_at"] if "metadata" in existing_prompt else None,
 			}
 		except Exception as exc:
 			print(f"[PromptUpdater] Failed to update prompt for persona={persona}: {exc}")
@@ -134,12 +141,13 @@ class PromptUpdater:
 
 	def _load_system_prompt_from_goal_yaml(self, persona: str) -> str:
 		base_dir = Path(__file__).resolve().parents[2]
-		goal_path = base_dir / "personas" / persona / "goal.yaml"
+		filename = "prompts.yaml" if persona == "chat" else "goal.yaml"
+		goal_path = base_dir / "personas" / persona / filename
 
 		with open(goal_path, "r", encoding="utf-8") as stream:
 			payload = yaml.safe_load(stream) or {}
 
-		return (payload.get("spec", {}) or {}).get("description", "")
+		return (payload.get("spec", {}) or {}).get("description", "") or payload.get("system", "")
 
 	def _redis_client(self) -> redis.Redis:
 		host = os.getenv("REDIS_HOST", self.redis_host)

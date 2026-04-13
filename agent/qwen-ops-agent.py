@@ -1,6 +1,7 @@
 import asyncio
 import importlib.util
 import os
+import copy
 import uuid
 from pathlib import Path
 import yaml
@@ -17,8 +18,11 @@ from agent_memory_client.models import WorkingMemory, MemoryMessage
 
 # Agent
 from qwen_agent.agents import Assistant
+from qwen_agent.llm.schema import Message
 from qwen_agent.tools.base import BaseTool, register_tool 
 from qwen_agent.tools.mcp_manager import MCPManager
+from qwen_agent.utils.tokenization_qwen import tokenizer as qwen_tokenizer
+from qwen_agent.utils.utils import extract_text_from_message
 from qwen_agent.utils.output_beautify import typewriter_print
 
 from templates.core.autonomous_agent import AutonomousAgent
@@ -134,7 +138,7 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         self.sessions = {} # PLACEHOLDER ONLY
         self.memory_client = self._initialize_memory_manager()
 
-        print(f"[I] Initializing {PERSONA} agent with goal \n {goal.description}")
+        # print(f"[I] Initializing {PERSONA} agent with goal \n {goal.description}")
         # Initialize AutonomousAgent
         AutonomousAgent.__init__(
             self,
@@ -160,11 +164,49 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         """Allow MCP servers that do not implement ping (legacy stdio servers)."""
         apply_mcp_ping_compat_patch()
 
+    def compute_prompt_token_length(self, messages: List[Dict], lang: str = "en") -> int:
+        """Compute request prompt tokens after Qwen function-call preprocessing."""
+        if not getattr(self, "llm", None):
+            return 0
+
+        llm = self.llm
+        if not hasattr(llm, "_preprocess_messages"):
+            return 0
+
+        msg_dicts = [m.dict() if hasattr(m, "dict") else m for m in messages]
+        if self.system_message and (not msg_dicts or msg_dicts[0].get("role") != "system"):
+            msg_dicts = [{"role": "system", "content": self.system_message}] + msg_dicts
+
+        msg_objs = [m if isinstance(m, Message) else Message(**m) for m in msg_dicts]
+        functions = [func.function for func in self.function_map.values()]
+        generate_cfg = copy.deepcopy(getattr(llm, "generate_cfg", {}))
+
+        try:
+            preprocessed = llm._preprocess_messages(
+                messages=msg_objs,
+                lang=lang,
+                generate_cfg=generate_cfg,
+                functions=functions,
+                use_raw_api=getattr(llm, "use_raw_api", False),
+            )
+        except Exception as e:
+            print(f"[W] Prompt token preprocessing failed: {e}")
+            return 0
+
+        total = 0
+        for msg in preprocessed:
+            if msg.role == "assistant" and msg.function_call:
+                total += qwen_tokenizer.count_tokens(f"{msg.function_call}")
+            else:
+                total += qwen_tokenizer.count_tokens(
+                    extract_text_from_message(msg, add_upload_info=True)
+                )
+        return total
+
     async def reason(self, percepts=[], workflow_id=None):
         #****************** START OF WORKFLOW ******************
         print("Perfoming reasoning.... ")
         workflow_start_time = datetime.now()
-        # TODO Goal Life Cycle Management
         try:
             print("Trying to extract workflow id from percepts")
             workflow_id: str = percepts[0]['data'].get('workflow_id', None) or str(uuid.uuid4())
@@ -201,23 +243,27 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         assistant_response  = ""
         structured_responses: List[Dict] = []
         task_total_token_cost = None
+        task_prompt_token_cost = None
         task_gen_token_cost = None
+        ttft = None
         try:
             # TODO Measure generation latency here
+            # TODO Measure TTFT (time to first token)
             gen_time = datetime.now()
             for response in self.run(messages=messages):
+                if ttft is None:
+                    ttft = datetime.now() - gen_time
+                    print(f"⏱️ Time to first token: {ttft.seconds + ttft.microseconds/1e6} seconds")
                 tmp = typewriter_print(response, tmp)
                 # print("iterator response", type(response), response)
             gen_latency = datetime.now() - gen_time
 
             structured_responses = response
-            # Measure total task cost (tokens)
-            # ---> system prompt + history + user prompt + tool call/response + final answer
-            to_compute_tokens = [{"role": "system", "content": self.goal.description }] + messages + structured_responses
-            task_total_token_cost = self.compute_total_tokens(to_compute_tokens)
-            # Measure token cost for just the answer generation (system prompt + user prompt + history that goes into context + final answer, excluding tool calls and their responses)
+            task_prompt_token_cost = self.compute_prompt_token_length(messages=messages, lang="en")
+            print(f"[TokenUsage] Prompt tokens: {task_prompt_token_cost}")
             assistant_responses = [r for r in structured_responses if r['role']=='assistant' ]
             task_gen_token_cost = self.compute_total_tokens(assistant_responses)
+            task_total_token_cost = task_prompt_token_cost + task_gen_token_cost
 
             assistant_response = response[-1]['content'] # Most workflow agent answer are now in markdown format. 
         except Exception as e:
@@ -234,10 +280,13 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
             task = prompt['content'], 
             response_messages = structured_responses,
             agent_type = PERSONA,
+            #TODO agent mode args
         )
         # TODO add token cost, latency, etc. in record
         workflow_exec.task_total_token_cost = task_total_token_cost
+        workflow_exec.task_prompt_token_cost = task_prompt_token_cost
         workflow_exec.task_gen_token_cost = task_gen_token_cost
+        workflow_exec.ttft = ttft.seconds + ttft.microseconds/1e6 if ttft else None
         # workflow_exec.model_generation_latency = gen_latency.seconds + gen_latency.microseconds/1e6
         workflow_exec.workflow_latency = workflow_latency.seconds + workflow_latency.microseconds/1e6
         workflow_exec.system_prompt_ref = self.system_prompt_status.get("latest_key", None) if self.system_prompt_status else None

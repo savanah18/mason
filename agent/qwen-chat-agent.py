@@ -115,7 +115,7 @@ async def send_message(request: ChatRequest):
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     
     try:
-        response, context_len, input_len = await backend.send_message(session_id, request.message)
+        response, context_len, input_len, workflow_id = await backend.send_message(session_id, request.message, workflow_id=request.workflow_id)
         # Re-fetch session to ensure we have latest state
         _, session = await backend.get_session(session_id)
         total_msgs = len(session.messages)
@@ -127,7 +127,8 @@ async def send_message(request: ChatRequest):
             message_count=total_msgs,
             context_length=context_len,
             total_history=total_msgs,
-            input_length=input_len
+            input_length=input_len,
+            workflow_id=workflow_id
         )
     except Exception as e:
         print(f"⚠ Error processing message: {e}")

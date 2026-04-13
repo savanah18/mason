@@ -70,7 +70,13 @@ def normalize_eval_record(raw_record: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_system_prompt(goal: dict[str, Any]) -> str:
-    description = goal.get("spec", {}).get("description", "No goal description provided")
+    # Support both Goal CRD files (spec.description) and prompt files (system/prompts).
+    description = (
+        goal.get("spec", {}).get("description")
+        or goal.get("system")
+        or goal.get("prompts")
+        or "No goal description provided"
+    )
 
     return f"""You are an LLM judge evaluating an autonomous package deployer agent.
 
@@ -123,6 +129,11 @@ Return a JSON object with these fields:
 - "failure_attribution": "agent" | "environment" | "mixed" - Primary attribution for any failure or degraded outcome
 - "environment_remarks": string - Short note stating whether failure appears environment-specific and why (include cited evidence)
 """
+
+
+def is_prompt_too_small_error(exc: Exception) -> bool:
+    msg = str(exc)
+    return "Cached content is too small" in msg and "INVALID_ARGUMENT" in msg
 
 
 def build_user_prompt(eval_record: dict[str, Any]) -> str:
@@ -249,6 +260,7 @@ def create_cache(
             ttl=f"{ttl_seconds}s",
         ),
     )
+
     cache_name = cached_content.name
     cache_metadata = {
         "cache_name": cache_name,
@@ -279,9 +291,23 @@ def load_cache_metadata(run_dir: Path) -> dict[str, Any] | None:
     return None
 
 
+def get_workflow_ids_union(run_dir: Path) -> tuple[list[str], set[str]]:
+    """Get union of workflow IDs from metadata and directory.
+    
+    Returns:
+        (union_ids, available_json_ids) - List of all workflow IDs and set of IDs with existing JSON files
+    """
+    metadata_ids = load_workflow_ids_from_metadata(run_dir)
+    dir_ids = {p.stem for p in run_dir.glob("*.json") if p.is_file()}
+    union_ids = list(dict.fromkeys(metadata_ids))  # Preserve metadata order, remove duplicates
+    union_ids.extend(sorted(dir_ids - set(union_ids)))  # Add any dir-only IDs not in metadata
+    return union_ids, dir_ids
+
+
 def build_jsonl_requests(
     workflow_files: list[Path],
-    cache_name: str,
+    cache_name: str | None,
+    system_prompt: str | None = None,
 ) -> list[dict[str, Any]]:
     requests: list[dict[str, Any]] = []
 
@@ -290,24 +316,28 @@ def build_jsonl_requests(
         user_prompt = build_user_prompt(eval_record)
         workflow_id = file_path.stem
 
-        requests.append(
-            {
-                "key": workflow_id,
-                "request": {
-                    "contents": [
-                        {
-                            "role": "user",
-                            "parts": [{"text": user_prompt}],
-                        }
-                    ],
-                    "cached_content": cache_name,
-                    "generation_config": {
-                        "temperature": 0,
-                        "response_mime_type": "application/json",
-                    },
-                },
-            }
-        )
+        request_payload: dict[str, Any] = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": user_prompt}],
+                }
+            ],
+            "generation_config": {
+                "temperature": 0,
+                "response_mime_type": "application/json",
+            },
+        }
+
+        if cache_name:
+            request_payload["cached_content"] = cache_name
+        else:
+            # Manual system instruction fallback when cache creation is not possible.
+            if not system_prompt:
+                raise RuntimeError("system_prompt is required when cache_name is not provided")
+            request_payload["system_instruction"] = system_prompt
+
+        requests.append({"key": workflow_id, "request": request_payload})
 
     return requests
 
@@ -485,12 +515,18 @@ def main() -> None:
         test_id=args.test_id,
         timeout_seconds=args.result_extract_timeout,
     )
-    workflow_files = discover_workflow_files(run_dir)
+    
+    # Get union of workflows from metadata and directory
+    union_ids, available_json_ids = get_workflow_ids_union(run_dir)
+    workflow_files = [run_dir / f"{workflow_id}.json" for workflow_id in union_ids if workflow_id in available_json_ids]
+    
     if still_missing:
         print(
             "Proceeding with available workflow files only. "
-            f"Recovered={len(workflow_files)} Missing={len(still_missing)}"
+            f"Recovered={len(available_json_ids)} Missing={len(still_missing)}"
         )
+    print(f"Union of workflows: {len(union_ids)} total (metadata + directory)")
+    print(f"Available JSON files: {len(available_json_ids)}")
 
     goal = load_yaml(args.goal_file)
     system_prompt = build_system_prompt(goal)
@@ -498,6 +534,7 @@ def main() -> None:
     # Determine cache name
     cache_name: str | None = args.cache_name
     cache_metadata: dict[str, Any] | None = None
+    use_manual_system_injection = False
 
     if not cache_name:
         # Try to load existing cache metadata
@@ -507,24 +544,36 @@ def main() -> None:
             print(f"Reusing existing cache: {cache_name}")
         elif args.create_cache:
             # Create new cache
-            cache_name, cache_metadata = create_cache(
-                client,
-                args.model,
-                system_prompt,
-                ttl_seconds=args.cache_ttl,
-            )
-            save_cache_metadata(run_dir, cache_metadata)
+            try:
+                cache_name, cache_metadata = create_cache(
+                    client,
+                    args.model,
+                    system_prompt,
+                    ttl_seconds=args.cache_ttl,
+                )
+                save_cache_metadata(run_dir, cache_metadata)
+            except Exception as exc:
+                if is_prompt_too_small_error(exc):
+                    print("Cache creation failed: prompt too small. Falling back to manual system prompt injection.")
+                    use_manual_system_injection = True
+                    cache_name = None
+                else:
+                    raise
         else:
             raise RuntimeError(
                 "No cache specified. Use --cache-name, --create-cache, or ensure cache_metadata.json exists."
             )
 
-    if not cache_name:
+    if not cache_name and not use_manual_system_injection:
         raise RuntimeError("Failed to determine cache name")
 
     # Build and write JSONL with cache reference
     jsonl_out = args.jsonl_out or (run_dir / f"{args.test_id}.jsonl")
-    request_lines = build_jsonl_requests(workflow_files, cache_name)
+    request_lines = build_jsonl_requests(
+        workflow_files,
+        cache_name,
+        system_prompt=system_prompt if use_manual_system_injection else None,
+    )
     write_jsonl(jsonl_out, request_lines)
 
     print(f"Discovered workflow files: {len(workflow_files)}")

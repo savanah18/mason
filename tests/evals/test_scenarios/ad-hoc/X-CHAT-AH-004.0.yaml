@@ -3,6 +3,7 @@ chat-prompt: |
   Ad-hoc request: identify one high-impact deployment and apply a targeted right-size update
   for cpu/memory in media-microservices namespace, then report patch summary.
   Constraint: use up to 3 related tool calls.
+  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
   # Pre-condition: namespace must be available and workloads should exist.
   kubectl get ns media-microservices || kubectl create ns media-microservices
@@ -18,14 +19,16 @@ execution-script: |
   json_payload=$(jq -n \
   --arg message "$CHAT_PROMPT" \
   --arg session_id "$SESSION_ID" \
-  '{message: $message, session_id: $session_id}')
+  --arg workflow_id "$WORKFLOW_ID" \
+  '{message: $message, session_id: $session_id, workflow_id: $workflow_id}')
 
   curl -X POST "${CHAT_ENDPOINT}/chat/send" \
     -H "Content-Type: application/json" \
     -d "$json_payload"
 expected-execution-time: "600"
 output-retrieval-script: |
-  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
+  PERSONA=chat
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} $PERSONA
 evaluation-script:
   echo TODO evaluation script with LLM as a judge
 post-condition-script: |

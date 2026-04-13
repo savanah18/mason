@@ -7,10 +7,9 @@ from pathlib import Path
 
 # TODO Prefix all information with test case id as well
 def _find_workflow_key(r, workflow_id: str, persona: str | None):
-    if persona:
-        return f"workflow:{persona}:{workflow_id}"
-
-    pattern = f"workflow:*:{workflow_id}"
+    # if persona:
+    #     return f"workflow:dev:{persona}:{workflow_id}"
+    pattern = f"workflow:dev:{persona}:{workflow_id}" #TODO addd agent mode?
     matched = list(r.scan_iter(match=pattern, count=100))
     if not matched:
         return None
@@ -22,7 +21,7 @@ def _find_workflow_key(r, workflow_id: str, persona: str | None):
 def main(
     workflow_id: str,
     timeout: int = 30,
-    interval: int = 2,
+    interval: int = 30,
     persona: str | None = None,
     run_date: str | None = None,
     session_id: str | None = None,

@@ -10,6 +10,24 @@ pre-condition-script: |
   # Pre-condition: Verify media-microservices namespace and services exist with no resource quotas.
   kubectl get ns media-microservices || kubectl create ns media-microservices
   kubectl get svc -n media-microservices --no-headers | wc -l
+
+  kubectl delete resourcequota -n media-microservices
+  for deploy in $(kubectl get deployments -n media-microservices --no-headers | awk '{print $1}'); do
+    kubectl patch deployment "$deploy" -n media-microservices --type='json' \
+      -p='[{"op": "replace", "path": "/spec/replicas", "value":1}]' || true
+    kubectl patch deployment "$deploy" -n media-microservices --type='json' \
+      -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/resources", "value":{}}]' || true
+  done
+  
+  sleep 5
+  kubectl patch deployment user-review-service -n media-microservices --type='json' \
+      -p='[{"op": "replace", "path": "/spec/replicas", "value":3}]' || true
+  # kubectl patch deployment nginx-web-server -n media-microservices --type='json' \
+  #     -p='[{"op": "replace", "path": "/spec/replicas", "value":2}]' || true
+  kubectl set resources deploy unique-id-service -n media-microservices \
+        --requests=cpu=512m,memory=256Mi --limits=cpu=1024m,memory=512Mi || true
+  sleep 10
+      
 execution-script: |
   export CHAT_ENDPOINT=127.0.0.1:8002
   SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
@@ -28,7 +46,8 @@ execution-script: |
     -d "$json_payload"
 expected-execution-time: "600"
 output-retrieval-script: |
-  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
+  PERSONA=resiliency-optimizer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
 evaluation-script:
   echo TODO evaluation script with LLM as a judge
 post-condition-script: |

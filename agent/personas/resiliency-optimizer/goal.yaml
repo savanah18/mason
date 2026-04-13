@@ -27,6 +27,8 @@ spec:
     Plan your actions carefully.
     Follow steps in this workflow. 
     Execute necessary retries up to 3 times for tool calls that fails.
+    Do the steps test execution to analysis and optimization in sequence.
+    If current step fails, Skip to output and reporting
     
     1. **Execute Tests**  
     - Run a Helm test in the received release and namespace information.  
@@ -40,11 +42,11 @@ spec:
       2.2 ** Service Resource Usage **
         - Query CPU usage with:  
             ```
-            topk(10, max by (pod) (rate(container_cpu_usage_seconds_total{namespace="NAMESPACE"}[5m])))
+            topk(5, max by (pod) (rate(container_cpu_usage_seconds_total{namespace="NAMESPACE"}[5m])))
             ```
         - Query memory usage with:  
             ```
-            topk(10, sum by (pod) (container_memory_usage_bytes{namespace="NAMESPACE"}))
+            topk(5, sum by (pod) (container_memory_usage_bytes{namespace="NAMESPACE"}))
             ```
         - Use step = 1m in queries.  
         - Tabularize service resource usage (i.e. peak/average cpu usage in cores, peak and average memory usage in bytes)

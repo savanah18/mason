@@ -1,7 +1,7 @@
 id: DEP-E-002.0
 chat-prompt: |
-  Please process an update for billing-worker in namespace finance using chart bitnami/redis version 25.3.9.
-  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/redis instead of Helm repo URLs.
+  Please process an update for billing-worker in namespace finance.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/redis version 25.3.9.
   You may choose either a history-aware or direct validation path before updating, whichever is safer from observed state.
   Send the request as one Kafka event payload in JSON.
   Include the core fields from the request, and include workflow metadata if present.
@@ -30,7 +30,8 @@ execution-script: |
     -d "$json_payload"
 expected-execution-time: "600"
 output-retrieval-script: |
-  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
 evaluation-script:
   echo TODO evaluation script with LLM as a judge
 post-condition-script: |

@@ -1,7 +1,7 @@
 id: DEP-E-001.3
 chat-prompt: |
-  Please process a fresh install for media-api in namespace media using chart bitnami/nginx version 22.6.10.
-  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx instead of Helm repo URLs.
+  Please process a fresh install for media-api in namespace media.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10. .
   If the release already exists, you may choose no-op confirmation or upgrade-readiness based on observed state.
   Send the request as one Kafka event payload in JSON.
   Include the core fields from the request, and include workflow metadata if present.
@@ -12,7 +12,7 @@ pre-condition-script: |
   echo "Skipping helm repo update: using OCI charts"
   kubectl create ns media --dry-run=client -o yaml | kubectl apply -f -
   helm uninstall media-api -n media || true
-  helm install media-api oci://registry-1.docker.io/bitnamicharts/nginx --version 22.6.10 -n media
+  helm install media-api oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10. --version 22.6.10 -n media || true
 execution-script: |
   export CHAT_ENDPOINT=127.0.0.1:8002
   SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
@@ -33,7 +33,8 @@ execution-script: |
     -d "$json_payload"
 expected-execution-time: "600"
 output-retrieval-script: |
-  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS}
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
 evaluation-script:
   echo TODO evaluation script with LLM as a judge
 post-condition-script: |
