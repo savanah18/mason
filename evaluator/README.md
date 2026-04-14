@@ -11,3 +11,8 @@ GEMINI_API_KEY=api-key python3 batch_evaluator.py  --date ${DATE}  --test-id ${T
 ```
 GEMINI_API_KEY=xx python3 monitor_batch_results.py --download-results
 ```
+
+## Aggregation
+```
+python3 evaluation_score_aggregation.py --batch-dir batch_results/deployer/ --pattern *.jsonl --persona deployer --output-csv deployer_score.csv
+```

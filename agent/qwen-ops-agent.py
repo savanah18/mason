@@ -80,6 +80,10 @@ from actions.tools.kubernetes.tools import (
     KubernetesApplyResourceUpdate,
 )
 
+from actions.tools.prompt_optimization.tools import (
+    PromptOptimizationRetrieveWorkflowResults
+)
+
 
 def _load_prompt_optimization_tools():
     """Load prompt optimization tools from a hyphenated path via importlib."""

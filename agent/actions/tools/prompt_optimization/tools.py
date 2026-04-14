@@ -39,6 +39,38 @@ def _prompt_opt_batch_size() -> int:
         return 16
 
 
+def _resolve_target_personas(raw_persona: Any, enabled_personas: List[str]) -> List[str]:
+    """Resolve a single optional persona filter against enabled personas."""
+    if raw_persona is None:
+        return enabled_personas
+
+    if not isinstance(raw_persona, str):
+        return []
+
+    requested = raw_persona.strip()
+    if not requested:
+        return enabled_personas
+
+    return [requested] if requested in set(enabled_personas) else []
+
+
+def _get_latest_prompt_created_at(redis_client: redis.Redis, persona: str) -> str | None:
+    """Return metadata.created_at for the persona's latest system prompt."""
+    latest_key = f"system-prompts:{persona}:latest"
+    prompt_data = redis_client.hgetall(latest_key) or {}
+    metadata_raw = prompt_data.get("metadata")
+    if not metadata_raw:
+        return None
+
+    try:
+        metadata = json.loads(metadata_raw)
+    except Exception:
+        return None
+
+    created_at = metadata.get("created_at")
+    return created_at if isinstance(created_at, str) and created_at.strip() else None
+
+
 @register_tool("prompt-optimization-retrieve-workflow-results")
 class PromptOptimizationRetrieveWorkflowResults(MemoryTraceableTool):
     """Retrieve unprocessed workflow results for prompt optimization."""
@@ -47,7 +79,7 @@ class PromptOptimizationRetrieveWorkflowResults(MemoryTraceableTool):
 
     description = (
         "Retrieve workflow results for personas enabled for optimization where "
-        "optimization.prompt is UNPROCESSED or optimization data does not exist."
+        "optimization.reference matches the latest system prompt created_at."
     )
 
     parameters = [
@@ -55,6 +87,12 @@ class PromptOptimizationRetrieveWorkflowResults(MemoryTraceableTool):
             "name": "max_results",
             "type": "integer",
             "description": "Optional max number of workflows to retrieve (defaults to PROMPT_OPT_NUM_BATCH).",
+            "required": False,
+        },
+        {
+            "name": "persona",
+            "type": "string",
+            "description": "Optional single persona filter (must be one of AGENTS_ENABLED_FOR_OPTIMIZATION).",
             "required": False,
         },
     ] + TRACEABILITY_PARAMS_ADD_ONS
@@ -72,16 +110,21 @@ class PromptOptimizationRetrieveWorkflowResults(MemoryTraceableTool):
             except Exception:
                 max_results = _prompt_opt_batch_size()
 
-            agents = _agents_enabled_for_optimization()
+            enabled_agents = _agents_enabled_for_optimization()
+            agents = _resolve_target_personas(args.get("persona"), enabled_agents)
             r = redis.Redis(host="redis", port=6379, decode_responses=True)
 
             retrieved_workflows: List[Dict[str, Any]] = []
+            latest_prompt_created_at: Dict[str, str | None] = {
+                persona: _get_latest_prompt_created_at(r, persona) for persona in agents
+            }
 
             for persona in agents:
                 if len(retrieved_workflows) >= max_results:
                     break
 
                 key_pattern = f"workflow:*:{persona}:*"
+                target_reference = latest_prompt_created_at.get(persona)
                 for key in r.scan_iter(match=key_pattern):
                     if len(retrieved_workflows) >= max_results:
                         break
@@ -90,14 +133,12 @@ class PromptOptimizationRetrieveWorkflowResults(MemoryTraceableTool):
                     optimization_raw = workflow.get("optimization")
 
                     include = False
-                    if not optimization_raw:
-                        include = True
-                    else:
+                    if optimization_raw and target_reference:
                         try:
                             optimization = json.loads(optimization_raw)
-                            include = optimization.get("prompt") == "UNPROCESSED"
+                            include = optimization.get("reference") == target_reference
                         except Exception:
-                            include = True
+                            include = False
 
                     if not include:
                         continue
@@ -112,25 +153,25 @@ class PromptOptimizationRetrieveWorkflowResults(MemoryTraceableTool):
                         {
                             "key": key,
                             "persona": persona,
+                            "latest_prompt_created_at": target_reference,
                             "workflow_id": metadata.get("workflow_id"),
                             "result": workflow.get("result", ""),
                         }
                     )
 
-            workflow_history = [wf.get("result", "") for wf in retrieved_workflows]
+            workflow_result_history = [wf.get("result", "") for wf in retrieved_workflows]
 
             result = {
                 "success": True,
-                "agents_enabled_for_optimization": agents,
+                "latest_prompt_created_at": latest_prompt_created_at,
                 "num_retrieved": len(retrieved_workflows),
-                "max_results": max_results,
-                "workflow_history": workflow_history,
-                "retrieved_workflows": retrieved_workflows,
+                "workflow_result_history": workflow_result_history,
                 "exec_id": exec_id,
             }
 
             self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
             return json.dumps(result, ensure_ascii=False)
+            # return  None
         except Exception as exc:
             result = {
                 "success": False,
