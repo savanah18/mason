@@ -81,7 +81,7 @@ from actions.tools.kubernetes.tools import (
 )
 
 from actions.tools.prompt_optimization.tools import (
-    PromptOptimizationRetrieveWorkflowResults
+    PromptOptimizationRetrieveWorkflows
 )
 
 
@@ -230,6 +230,19 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
                 Action: {self.goal.base_prompt}
             """
         }
+
+        # THIS PROMPT IS FOR MOCK PLAN ONLY
+        # prompt = {
+        #     'role': 'user', 
+        #     'content': f"""
+        #         Percepts: {json.dumps([p['data'] for p in percepts])}
+        #         Current workflow ID: {workflow_id}
+        #         DO NOT execute any tools, this is a test workflow to verify agent planning capabilities.
+        #         I repeat do not execute any tools.
+        #         Action: Executed instruction from perceived event.
+        #     """
+        # }
+
         print(prompt)
 
         # Use a deterministic session per workflow to avoid cross-task history bleed.

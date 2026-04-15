@@ -6,12 +6,9 @@ metadata:
     app: prompt-optimizer-actuators
     type: autonomous
 spec:
-  mcp-servers:
-    mcp-time:
-      type: "stdio"
-      args: []
-      command: "/app/actions/mcp/servers/time/mcp-time"
+  mcp-servers: {}
   builtin-functions:
-    - "prompt-optimization-retrieve-workflow-results"
-    - "prompt-update"
+    - "prompt-optimization-retrieve-system-prompt"
+    - "prompt-optimization-retrieve-workflows"
+    - "prompt-optimization-retrieve-workflow-result"
   exclude-tools: []

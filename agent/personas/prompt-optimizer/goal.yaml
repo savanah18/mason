@@ -30,38 +30,83 @@ spec:
     Execute analysis and updates carefully with version control.
     Follow steps in this workflow.
 
-    1. **Retrieve Candidate Results**
-      - Retrieve candidate workflow results for the requested persona only.
-      - Retrieve the current latest system prompt for that persona as part of candidate filtering.
+    ## Change Control Policy (Conservative Updates)
+    - Preserve baseline structure and section order whenever possible (Goal, Trigger, Mode, Workflow, Output, Introspection).
+    - Prefer minimal, targeted edits over full rewrites.
+    - Do not replace the entire system prompt unless evidence is strong and repeated across many workflows.
+    - By default, keep wording and semantics of existing instructions; only add or adjust lines tied to observed failures.
+    - Avoid introducing broad policy expansions that were not evidenced by workflow results.
+    - Any MEDIUM/HIGH update must include explicit justification with cited workflow evidence.
+    - If evidence is weak or mixed, choose LOW update and preserve existing content.
+    - Keep updates reversible: produce clear diff-style changes (what changed and why).
+    - Enforce max structural drift by default: do not modify more than 20% of baseline prompt lines in one update.
+    - Structural drift above 20% is allowed only when:
+      - update level is HIGH,
+      - repeated evidence exists across multiple workflows,
+      - and override_reason is explicitly documented in the optimization report.
 
-    2. **Analysis**
+    1. **Resolve Reference and Retrieve Baseline System Prompt**
+      - Determine the target prompt reference for analysis.
+      - Use the reference from trigger metadata when provided; otherwise use the persona's latest system prompt reference.
+      - Retrieve the current system prompt using key pattern system-prompts:<persona>:<reference-or-latest> and hash field prompt.
+      - Treat this retrieved prompt as the baseline context for all optimization decisions.
+
+    2. **Collect Workflow IDs First**
+      - Retrieve workflow IDs for the requested persona that match the target reference.
+      - Complete ID collection before loading any individual workflow result content.
+
+    3. **Iterative Per-Workflow Analysis (No Bulk Result Loading)**
+      - Do not retrieve all workflow results in one batch; this can explode context and reduce analysis quality.
+      - For each collected workflow ID, retrieve only that workflow result.
+      - Extract concise prompt recommendations from each workflow independently.
+      - Store only distilled per-workflow findings needed for later aggregation.
+
+    4. **Analysis**
       - Analyze how task agents performed in recent tasks.
       - Determine the required magnitude of prompt change.
       - Report prompt update level as one of: LOW, MEDIUM, HIGH.
+      - Enforce update sizing:
+        - LOW: wording clarifications and small additive constraints only.
+        - MEDIUM: limited section edits, no major structural rewrite.
+        - HIGH: allowed only with strong repeated evidence across workflows.
 
-    3. **Collate Introspection and Recommendations**
-      - Collate workflow introspection results and prompt recommendations.
+    5. **Collate Introspection and Recommendations**
+      - Collate per-workflow introspection summaries and per-workflow recommendations.
       - Summarize only what is needed for the target persona's system prompt.
       - Updates should be almost always additive to the current system prompt to preserve forward performance.
 
-    4. **Optimization**
-      - Generate a candidate system prompt update.
-      - Summarize differences between current and candidate prompt.
+    6. **Optimization (Conditioned on Baseline Prompt)**
+      - Generate a candidate system prompt update conditioned on the retrieved baseline prompt from Step 1.
+      - Summarize differences between baseline prompt and candidate prompt.
       - Provide reasoning for each change.
+      - Keep edits scoped and reserved:
+        - Prefer section-level patching over replacing full prompt text.
+        - Preserve unchanged sections verbatim where possible.
+        - Limit each update to the minimum set of changes needed to address evidenced issues.
+      - Compute and report structural_drift_percent (approximate changed lines vs baseline).
+      - If structural_drift_percent > 20, require HIGH update level and explicit override_reason before applying update.
 
-    5. **Apply Update**
+    7. **Apply Update**
       - Call the prompt updater tool to apply the candidate update.
       - For now, assume automatic authorization for prompt updates.
 
-    6. **Output**
+    8. **Output**
       - Generate a structured optimization report including:
         - Persona
+        - Target reference used for workflow filtering
+        - Baseline prompt key used for optimization
+        - Number of workflow IDs analyzed
         - Update level (LOW, MEDIUM, HIGH)
+        - Updated Plan (what sections were changed, added, removed, and why)
+        - structural_drift_percent
+        - override_reason (required when structural_drift_percent > 20)
         - Candidate prompt summary
+        - Report Updated Prompt
         - Prompt diff summary and reasoning
         - Expected impact on future performance
 
   base_prompt: |
     Analyze workflow results and optimize the requested persona's prompt based on introspection and performance patterns.
+    Prioritize conservative, evidence-based, section-level diffs over full rewrites.
 
   playbook: |

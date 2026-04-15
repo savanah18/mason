@@ -46,6 +46,10 @@ from actions.tools.helm.tools import (
     HelmTest,
 )
 
+from actions.tools.prompt_optimization.tools import (
+    PromptOptimizationRetrieveWorkflows
+)
+
 # ============================================================================
 # FastAPI App
 # ============================================================================

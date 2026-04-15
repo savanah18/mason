@@ -39,3 +39,5 @@ spec:
   - "resource-collector"
   - "kubernetes-list-workloads"
   - "kubernetes-apply-resource-update"
+  - "prompt-optimization-retrieve-workflows"
+  - "prompt-optimization-retrieve-workflow-result"

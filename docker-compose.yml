@@ -219,7 +219,7 @@ services:
         condition: service_healthy
 
   prompt-optimizer-agent:
-    profiles: ["agent", "experimental"]
+    profiles: ["agent", "standard"]
     image: agent-generic:latest
     container_name: prompt-optimizer-agent
     environment: 

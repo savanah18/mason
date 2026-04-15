@@ -1,5 +1,13 @@
 """Prompt optimization tools package."""
 
-from .tools import PromptOptimizationRetrieveWorkflowResults
+from .tools import (
+	PromptOptimizationRetrieveSystemPrompt,
+	PromptOptimizationRetrieveWorkflowResult,
+	PromptOptimizationRetrieveWorkflows,
+)
 
-__all__ = ["PromptOptimizationRetrieveWorkflowResults"]
+__all__ = [
+	"PromptOptimizationRetrieveWorkflows",
+	"PromptOptimizationRetrieveWorkflowResult",
+	"PromptOptimizationRetrieveSystemPrompt",
+]
