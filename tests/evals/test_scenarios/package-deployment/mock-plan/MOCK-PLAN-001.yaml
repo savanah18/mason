@@ -1,0 +1,31 @@
+id: MOCK-PLAN-001
+chat-prompt: |
+  Given the following environment scenarios.
+  Scenarios:
+  - Deployment target: release `checkout-api`, namespace `platform-core`, chart `oci://registry-1.docker.io/bitnamicharts/nginx`, requested version `22.6.10`.
+  - Operating context: version freeze period before release cut.
+  - Edge case A: Registry intermittently returns 401 for helm-registry-login; credentials may rotate during deployment window.
+  - Edge case B: Helm test hooks are flaky due to dependent service warm-up delays and transient DNS issues.
+  - Edge case C: Image tag policy rejects mutable tags; strict governance requires pinned versions and reproducibility checks.
+  - Constraint 1: Pre-check must account for existing releases via helm-list-releases before install/upgrade decisions.
+  - Constraint 2: Resource updates may be needed using kubernetes-apply-resource-update when limits/requests are missing.
+  - Constraint 3: When login fails but chart is public, plan should evaluate whether direct pull may still succeed safely.
+  - Additional realism: include fallback logic for transient failures, explicit safety checks before rollout, and rollback criteria if health signals degrade.
+  - Additional realism: assume unstable environment signals (event noise, delayed readiness, partial failures) and require a conservative, auditable deployment plan.
+
+  **IMPORTANT** Do not execute any tools.
+  Instead, provide a recommended plan to safely deploy checkout-api from oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10.
+
+
+pre-condition-script: |
+
+execution-script: |
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  true

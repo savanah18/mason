@@ -57,6 +57,11 @@ def load_json(path: Path) -> dict[str, Any]:
         return json.load(handle)
 
 
+def load_text(path: Path) -> str:
+    with path.open("r", encoding="utf-8") as handle:
+        return handle.read().strip()
+
+
 def normalize_eval_record(raw_record: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(raw_record)
     for key in ("function_calls", "function_executions", "metadata", "stats"):
@@ -69,7 +74,7 @@ def normalize_eval_record(raw_record: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def build_system_prompt(goal: dict[str, Any]) -> str:
+def build_system_prompt(goal: dict[str, Any], evaluation_prompt: str) -> str:
     # Support both Goal CRD files (spec.description) and prompt files (system/prompts).
     description = (
         goal.get("spec", {}).get("description")
@@ -90,44 +95,7 @@ You will be given the following information:
 - Function Executions: List of function executions and their results
 - Stats: General task statistics
 
-Evaluate the agent on these metrics:
-
-# Agent Metrics
-- Task Completion: (0/1) Whether the agent completed the task based on the final report.
-- Tool Accuracy: (0-1) Correctness of tool calls and their results based on function executions.
-- Step Efficiency: (0-1) Efficiency in using tools and taking steps (consider relevance and necessity).
-- Plan Adherence: (0-1) Whether actions align with a logical coherent plan toward task completion.
-- Faithfulness: (0-1) Whether the final report accurately reflects evidence from tool calls/executions.
-
-# Dynamic Environment and Attribution Rules
-- This evaluation runs in a dynamic environment. Not all failures are agent faults.
-- Before scoring, classify failure evidence as one of:
-    - Agent-caused: wrong tool choice, missing required step, incorrect parameters, contradictory reasoning, or ignored errors.
-    - Environment-caused: infrastructure unavailability, external auth outage/credential issues not provided to agent, missing cluster dependencies, transient registry/network failures, race conditions from concurrent tests.
-    - Mixed: both agent and environment contributed.
-- Do not harshly penalize task completion when the primary blocker is environment-caused and the agent behaved correctly.
-- In environment-caused failures, evaluate the agent on diagnosis quality, fallback behavior, retries, and clarity of remediation guidance.
-- Only reduce scores significantly when evidence shows the agent could have reasonably completed the task but failed due to its own decisions.
-
-# Evidence Requirements for Non-Agent Faults
-- If you claim a blocker is not the agent's fault, you must cite concrete evidence from FUNCTION_EXECUTIONS.
-- Prefer exact error patterns such as auth 401/403, registry fetch not found, timeout/refused connections, missing namespace/storage class, or other external dependency failures.
-- If evidence is insufficient to attribute externally, mark attribution as mixed or agent-caused.
-
-Return a JSON object with these fields:
-- "overall_score": number (0-10) - Aggregate score representing overall agent performance quality
-- "verdict": "pass" | "partial" | "fail" - Overall categorical judgment: "pass" = task completed successfully, "partial" = task partially completed with significant issues, "fail" = task not completed or critical failures
-- "summary": string - Concise 1-2 sentence summary of the evaluation findings and key outcome
-- "task_completion": number (0-1) - Binary score: 1 if task fully completed as specified, 0 if not completed
-- "tool_accuracy": number (0-1) - Accuracy of tool/function calls and correctness of their execution results
-- "step_efficiency": number (0-1) - Efficiency metric: cost-benefit of steps taken, relevance of actions, and absence of wasted operations
-- "plan_adherence": number (0-1) - Coherence of action sequence: whether actions form a logical plan toward the goal
-- "faithfulness": number (0-1) - Accuracy of final report: does it reflect the actual evidence from tool calls and execution results
-- "strengths": list of strings - 2-3 key strengths, specific examples of effective actions or insights
-- "issues": list of strings - 2-3 key issues or failures, specific problems that prevented full success
-- "evidence": list of strings with specific citations - Supporting evidence quotes or references from function calls/executions for key claims
-- "failure_attribution": "agent" | "environment" | "mixed" - Primary attribution for any failure or degraded outcome
-- "environment_remarks": string - Short note stating whether failure appears environment-specific and why (include cited evidence)
+{evaluation_prompt}
 """
 
 
@@ -253,6 +221,7 @@ def create_cache(
     ttl_seconds: int = 86400,
 ) -> tuple[str, dict[str, Any]]:
     """Create a cached system instruction and return (cache_name, cache_metadata)."""
+    print("DEBUG", system_prompt)
     cached_content = client.caches.create(
         model=model,
         config=types.CreateCachedContentConfig(
@@ -277,6 +246,7 @@ def create_cache(
 def save_cache_metadata(run_dir: Path, cache_metadata: dict[str, Any]) -> None:
     """Save cache metadata to file for reuse."""
     metadata_file = run_dir / "cache_metadata.json"
+    metadata_file.parent.mkdir(parents=True, exist_ok=True)
     with metadata_file.open("w", encoding="utf-8") as f:
         json.dump(cache_metadata, f, indent=2, default=str)
     print(f"Saved cache metadata: {metadata_file}")
@@ -429,6 +399,12 @@ def parse_args() -> argparse.Namespace:
         help="Path to the agent goal YAML file",
     )
     parser.add_argument(
+        "--evaluation-prompt-file",
+        type=Path,
+        default=Path(__file__).resolve().parent / "e2e_evaluation_prompt.md",
+        help="Path to evaluation rubric/instructions markdown (default: e2e_evaluation_prompt.md)",
+    )
+    parser.add_argument(
         "--eval-root",
         type=Path,
         default=Path("../tests/evals"),
@@ -508,6 +484,10 @@ def main() -> None:
     client = genai.Client(api_key=api_key)
 
     run_dir = args.eval_root / args.date / args.test_id
+    if not run_dir.exists():
+        run_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Created missing run directory: {run_dir}")
+
     still_missing = recover_missing_workflow_results(
         eval_root=args.eval_root,
         run_dir=run_dir,
@@ -529,7 +509,8 @@ def main() -> None:
     print(f"Available JSON files: {len(available_json_ids)}")
 
     goal = load_yaml(args.goal_file)
-    system_prompt = build_system_prompt(goal)
+    evaluation_prompt = load_text(args.evaluation_prompt_file)
+    system_prompt = build_system_prompt(goal, evaluation_prompt)
 
     # Determine cache name
     cache_name: str | None = args.cache_name
@@ -537,13 +518,8 @@ def main() -> None:
     use_manual_system_injection = False
 
     if not cache_name:
-        # Try to load existing cache metadata
-        cache_metadata = load_cache_metadata(run_dir)
-        if cache_metadata:
-            cache_name = cache_metadata.get("cache_name")
-            print(f"Reusing existing cache: {cache_name}")
-        elif args.create_cache:
-            # Create new cache
+        if args.create_cache:
+            # Create a fresh cache when explicitly requested.
             try:
                 cache_name, cache_metadata = create_cache(
                     client,
@@ -560,12 +536,25 @@ def main() -> None:
                 else:
                     raise
         else:
-            raise RuntimeError(
-                "No cache specified. Use --cache-name, --create-cache, or ensure cache_metadata.json exists."
-            )
+            # Try to load existing cache metadata only when not forcing creation.
+            cache_metadata = load_cache_metadata(run_dir)
+            if cache_metadata:
+                cache_name = cache_metadata.get("cache_name")
+                print(f"Reusing existing cache: {cache_name}")
+            else:
+                raise RuntimeError(
+                    "No cache specified. Use --cache-name, --create-cache, or ensure cache_metadata.json exists."
+                )
 
     if not cache_name and not use_manual_system_injection:
         raise RuntimeError("Failed to determine cache name")
+
+    if not workflow_files:
+        print(
+            f"No workflow JSON files found in: {run_dir}. "
+            "Cache setup is complete; skipping JSONL generation and batch submission."
+        )
+        return
 
     # Build and write JSONL with cache reference
     jsonl_out = args.jsonl_out or (run_dir / f"{args.test_id}.jsonl")

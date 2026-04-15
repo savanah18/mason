@@ -1,0 +1,31 @@
+id: MOCK-PLAN-034
+chat-prompt: |
+  Given the following environment scenarios.
+  Scenarios:
+  - Deployment target: release `payments-gateway`, namespace `retail`, chart `oci://ghcr.io/acme/charts/payments`, requested version `3.4.1`.
+  - Operating context: incident recovery period with elevated alert noise.
+  - Edge case A: A previous manual hotfix changed release values directly, causing config drift from desired chart defaults.
+  - Edge case B: Helm history includes multiple superseded revisions with inconsistent descriptions and operator notes.
+  - Edge case C: Existing release has higher revision but app version drift; rollback history is available but ambiguous.
+  - Constraint 1: Namespace events may include unrelated noise; plan should isolate release-specific failure signals.
+  - Constraint 2: When login fails but chart is public, plan should evaluate whether direct pull may still succeed safely.
+  - Constraint 3: Pre-check must account for existing releases via helm-list-releases before install/upgrade decisions.
+  - Additional realism: include fallback logic for transient failures, explicit safety checks before rollout, and rollback criteria if health signals degrade.
+  - Additional realism: assume unstable environment signals (event noise, delayed readiness, partial failures) and require a conservative, auditable deployment plan.
+
+  **IMPORTANT** Do not execute any tools.
+  Instead, provide a recommended plan to safely deploy payments-gateway from oci://ghcr.io/acme/charts/payments version 3.4.1.
+
+
+pre-condition-script: |
+
+execution-script: |
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  true

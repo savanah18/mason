@@ -1,0 +1,31 @@
+id: MOCK-PLAN-058
+chat-prompt: |
+  Given the following environment scenarios.
+  Scenarios:
+  - Deployment target: release `audit-collector`, namespace `edge`, chart `oci://ghcr.io/acme/charts/audit-collector`, requested version `2.1.3`.
+  - Operating context: chaos test day with injected transient faults.
+  - Edge case A: Upstream dependency endpoint is unstable, causing readiness probe failures after deployment.
+  - Edge case B: Namespace is missing and must be created implicitly; admission webhooks are slow and can time out.
+  - Edge case C: NetworkPolicy defaults deny egress; registry and dependency endpoints may be unreachable after install.
+  - Constraint 1: When login fails but chart is public, plan should evaluate whether direct pull may still succeed safely.
+  - Constraint 2: Validation should include helm-template and helm-lint outcomes under noisy but recoverable warning conditions.
+  - Constraint 3: Resource updates may be needed using kubernetes-apply-resource-update when limits/requests are missing.
+  - Additional realism: include fallback logic for transient failures, explicit safety checks before rollout, and rollback criteria if health signals degrade.
+  - Additional realism: assume unstable environment signals (event noise, delayed readiness, partial failures) and require a conservative, auditable deployment plan.
+
+  **IMPORTANT** Do not execute any tools.
+  Instead, provide a recommended plan to safely deploy audit-collector from oci://ghcr.io/acme/charts/audit-collector version 2.1.3.
+
+
+pre-condition-script: |
+
+execution-script: |
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  true

@@ -1,0 +1,45 @@
+id: X-DEP-E-006.2
+chat-prompt: |
+  Please process a deploy request for media-api in namespace media.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10.
+  Context: release revision drift exists and rollback history is available but ambiguous.
+  Scenarios:
+  - Deployment target: release `media-api`, namespace `media`, chart `oci://registry-1.docker.io/bitnamicharts/nginx`, requested version `22.6.10`.
+  - Operating context: release revision drift exists and rollback history is available but ambiguous.
+  - Edge case A: The installed release has multiple revisions with slightly different values.
+  - Edge case B: Rollback history is available but not obviously safe without review.
+  - Edge case C: Resource requests were changed manually after an earlier deployment.
+  - Constraint 1: Inspect history before selecting rollback or upgrade strategy.
+  - Constraint 2: Keep the plan conservative if revision drift is detected.
+  - Constraint 3: Use workload verification to confirm the target state after remediation.
+  - Additional realism: include fallback logic for transient failures, explicit safety checks before rollout, and rollback criteria if health signals degrade.
+  - Additional realism: assume unstable environment signals (event noise, delayed readiness, partial failures) and require a conservative, auditable deployment plan.
+
+  Execute the deployment safely using the tools available to you.
+  Prioritize validation, safe rollout sequencing, and rollback readiness for media-api from oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10.
+
+pre-condition-script: |
+  kubectl create ns media --dry-run=client -o yaml | kubectl apply -f -
+  helm uninstall media-api -n media || true
+  helm install media-api oci://registry-1.docker.io/bitnamicharts/nginx --version 22.6.9 -n media --create-namespace
+  helm upgrade media-api oci://registry-1.docker.io/bitnamicharts/nginx --version 22.6.10 -n media || true
+execution-script: |
+  export CHAT_ENDPOINT=127.0.0.1:8002
+  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+
+  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  echo CHAT_PROMPT: ${CHAT_PROMPT}
+  echo SESSION_ID: ${SESSION_ID}
+
+  json_payload=$(jq -n   --arg message "$CHAT_PROMPT"   --arg session_id "$SESSION_ID"   '{message: $message, session_id: $session_id}')
+
+  curl -X POST "${CHAT_ENDPOINT}/chat/send"     -H "Content-Type: application/json"     -d "$json_payload"
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  helm uninstall media-api -n media || true
+  kubectl delete ns media --ignore-not-found=true

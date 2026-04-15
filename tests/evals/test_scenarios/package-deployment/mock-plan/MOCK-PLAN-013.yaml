@@ -1,0 +1,31 @@
+id: MOCK-PLAN-013
+chat-prompt: |
+  Given the following environment scenarios.
+  Scenarios:
+  - Deployment target: release `inventory-api`, namespace `sandbox`, chart `oci://registry-1.docker.io/bitnamicharts/nginx`, requested version `22.6.10`.
+  - Operating context: overnight maintenance window with reduced staff.
+  - Edge case A: Image tag policy rejects mutable tags; strict governance requires pinned versions and reproducibility checks.
+  - Edge case B: Prometheus scraping annotations are mandatory; missing labels can block promotion gates.
+  - Edge case C: Existing release with same name is in failed state with partial resources still present.
+  - Constraint 1: Post-install verification should consider kubernetes-list-workloads readiness mismatches and delayed rollouts.
+  - Constraint 2: If tests fail, plan should include deterministic triage before deciding rollback or retry.
+  - Constraint 3: If quotas are tight, plan should stage values overrides that reduce requests before retrying deployment.
+  - Additional realism: include fallback logic for transient failures, explicit safety checks before rollout, and rollback criteria if health signals degrade.
+  - Additional realism: assume unstable environment signals (event noise, delayed readiness, partial failures) and require a conservative, auditable deployment plan.
+
+  **IMPORTANT** Do not execute any tools.
+  Instead, provide a recommended plan to safely deploy inventory-api from oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10.
+
+
+pre-condition-script: |
+
+execution-script: |
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  true

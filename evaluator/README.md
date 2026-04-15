@@ -3,9 +3,10 @@
 ```
 DATE=20260409
 TEST_ID=4585b0e1-e7df-4f05-a814-ad8016f55dd5
-GEMINI_API_KEY=api-key python3 batch_evaluator.py  --date ${DATE}  --test-id ${TED_ID}  --goal-file ../agent/personas/deployer/goal.yaml --create-cache --submit
+GOAL_FILE=../agent/personas/deployer/goal.yaml
+EVALUATION_PROMPT_FILE=plan_evaluation_prompt.md
+GEMINI_API_KEY=api-key python3 batch_evaluator.py  --date ${DATE}  --test-id ${TED_ID}  --goal-file $GOAL_FILE --evaluation-prompt-file $EVALUATION_PROMPT_FILE --create-cache --submit
 ```
-
 
 ## Monitor Batch Evaluation
 ```

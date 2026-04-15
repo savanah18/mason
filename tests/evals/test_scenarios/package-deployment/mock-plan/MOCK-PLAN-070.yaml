@@ -1,0 +1,31 @@
+id: MOCK-PLAN-070
+chat-prompt: |
+  Given the following environment scenarios.
+  Scenarios:
+  - Deployment target: release `notification-engine`, namespace `media`, chart `oci://ghcr.io/acme/charts/notification-engine`, requested version `4.0.2`.
+  - Operating context: high-traffic peak period with strict SLOs.
+  - Edge case A: NetworkPolicy defaults deny egress; registry and dependency endpoints may be unreachable after install.
+  - Edge case B: Canary namespace mirrors production policies but has stale secrets and outdated configmaps.
+  - Edge case C: Chart pull occasionally fails with 429 rate limiting from OCI registry and requires careful retry/backoff planning.
+  - Constraint 1: If quotas are tight, plan should stage values overrides that reduce requests before retrying deployment.
+  - Constraint 2: Namespace events may include unrelated noise; plan should isolate release-specific failure signals.
+  - Constraint 3: If tests fail, plan should include deterministic triage before deciding rollback or retry.
+  - Additional realism: include fallback logic for transient failures, explicit safety checks before rollout, and rollback criteria if health signals degrade.
+  - Additional realism: assume unstable environment signals (event noise, delayed readiness, partial failures) and require a conservative, auditable deployment plan.
+
+  **IMPORTANT** Do not execute any tools.
+  Instead, provide a recommended plan to safely deploy notification-engine from oci://ghcr.io/acme/charts/notification-engine version 4.0.2.
+
+
+pre-condition-script: |
+
+execution-script: |
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  true

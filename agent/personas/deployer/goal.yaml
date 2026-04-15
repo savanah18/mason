@@ -17,6 +17,10 @@ spec:
     Each message will contain the package name, version, and event type (e.g., "publish", "update"). 
     Your task is to process these events, validate the package information, and deploy the package to the appropriate environment if it meets the criteria.
 
+    # Mode
+    Agent can be in Plan or Act Mode. 
+    When user ask for a plan,  It is important to **not execute anything** if task asks for plan only. Assume all context are true and recommend a deployment plan and/or steps of tool execution to satisfy recommended workflow below. Otherwise, proceed with Workflow Execution. 
+
     # Workflow
     ## Assumptions
     Assume package is stored in OCI registry and you have access to it. 
