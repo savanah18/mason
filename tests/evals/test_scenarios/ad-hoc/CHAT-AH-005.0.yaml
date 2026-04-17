@@ -2,7 +2,6 @@ id: CHAT-AH-005.0
 chat-prompt: |
   Ad-hoc request: use kubernetes-mcp-server to verify nginx-web-server deployment readiness,
   then cross-check compact workload data using builtin tools for media-microservices namespace.
-  Constraint: use up to 2 related tool calls.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
   # Pre-condition: namespace must be available for MCP readiness checks.

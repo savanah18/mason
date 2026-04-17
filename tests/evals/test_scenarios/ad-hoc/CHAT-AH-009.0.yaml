@@ -3,7 +3,6 @@ chat-prompt: |
   Ad-hoc request: publish a completion event to Kafka after verifying a bounded deployment update.
   Use kubernetes-list-workloads, then kafka-produce-message to send one status event to topic tests.normal.
   Keep the event payload small and include workflow metadata if injected.
-  Constraint: use up to 2 related tool calls.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
   # Pre-condition: namespace exists and workloads are available for inspection.

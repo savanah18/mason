@@ -3,7 +3,6 @@ chat-prompt: |
   Ad-hoc request: gather a compact health snapshot for media-microservices.
   Use kubernetes-pods_top first, then kubernetes-pods_log for one pod showing the most relevant recent error or warning.
   Summarize the busiest pod and any useful log signal in one short answer.
-  Constraint: use up to 2 related tool calls.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
   # Pre-condition: media-microservices namespace should exist and have pods.

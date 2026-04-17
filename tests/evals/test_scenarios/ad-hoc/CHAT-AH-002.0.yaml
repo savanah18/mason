@@ -3,7 +3,6 @@ chat-prompt: |
   Ad-hoc request: get a simple 5 minute CPU usage snapshot for workloads in media-microservices namespace.
   Prefer resource-collector if available, keep the request namespace-scoped, and avoid complex multi-stage queries.
   Summarize the top 3 CPU consumers from the snapshot result and note any obvious outliers.
-  Constraint: use exactly 1 related tool call.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
   # Pre-condition: media-microservices namespace should be available.

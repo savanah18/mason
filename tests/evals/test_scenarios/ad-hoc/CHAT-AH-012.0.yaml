@@ -5,7 +5,6 @@ chat-prompt: |
   apply a minimal cpu/memory update using kubernetes-apply-resource-update,
   then send one completion event to Kafka topic tests.normal with workflow metadata if injected.
   Avoid complex metrics queries; prefer a compact snapshot and a short justification for the chosen target.
-  Constraint: use up to 3 related tool calls.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
   # Pre-condition: search namespace should exist and workloads should be available.

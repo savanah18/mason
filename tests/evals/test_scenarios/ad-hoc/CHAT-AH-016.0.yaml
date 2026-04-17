@@ -3,7 +3,6 @@ chat-prompt: |
   Ad-hoc request: perform a bounded replica adjustment for one workload in namespace search.
   Use kubernetes-resources_list or kubernetes-pods_list_in_namespace to identify one target, then kubernetes-resources_scale to set a conservative replica count.
   Keep the change minimal and explain the before/after state.
-  Constraint: use up to 3 related tool calls.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
   # Pre-condition: search namespace should exist and have at least one deployment.

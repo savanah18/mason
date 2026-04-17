@@ -2,7 +2,6 @@ id: CHAT-AH-004.0
 chat-prompt: |
   Ad-hoc request: identify one high-impact deployment and apply a targeted right-size update
   for cpu/memory in media-microservices namespace, then report patch summary.
-  Constraint: use up to 3 related tool calls.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
   # Pre-condition: namespace must be available and workloads should exist.

@@ -238,7 +238,8 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         #         Percepts: {json.dumps([p['data'] for p in percepts])}
         #         Current workflow ID: {workflow_id}
         #         DO NOT execute any tools, this is a test workflow to verify agent planning capabilities.
-        #         I repeat do not execute any tools.
+        #         I repeat **DO NOT EXECUTE ANY TOOLS**. Just return the plan of which tools would have been executed in a structured format.
+        #         **Skip** pre-checks when in Plan Mode.
         #         Action: Executed instruction from perceived event.
         #     """
         # }

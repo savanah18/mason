@@ -58,11 +58,17 @@ spec:
     3. **Iterative Per-Workflow Analysis (No Bulk Result Loading)**
       - Do not retrieve all workflow results in one batch; this can explode context and reduce analysis quality.
       - For each collected workflow ID, retrieve only that workflow result.
+      - For each workflow, analyze three evidence channels together:
+        - reported result (agent-produced outcome and task narrative),
+        - introspection (tool usage, failures, execution traces, reasoning quality),
+        - grounded external evaluations (from stored evaluations attached to the workflow record).
+      - Treat external evaluations as grounded evidence to validate or challenge introspection-based conclusions.
       - Extract concise prompt recommendations from each workflow independently.
       - Store only distilled per-workflow findings needed for later aggregation.
 
     4. **Analysis**
-      - Analyze how task agents performed in recent tasks.
+      - Analyze how task agents performed in recent tasks using the combined evidence set: reported results + introspection + grounded evaluations.
+      - Resolve conflicts conservatively: when introspection and external evaluations disagree, prefer grounded evidence and document the discrepancy.
       - Determine the required magnitude of prompt change.
       - Report prompt update level as one of: LOW, MEDIUM, HIGH.
       - Enforce update sizing:
@@ -70,8 +76,9 @@ spec:
         - MEDIUM: limited section edits, no major structural rewrite.
         - HIGH: allowed only with strong repeated evidence across workflows.
 
-    5. **Collate Introspection and Recommendations**
-      - Collate per-workflow introspection summaries and per-workflow recommendations.
+    5. **Collate Findings and Recommendations**
+      - Collate per-workflow summaries across reported results, introspection, and grounded evaluations.
+      - Record agreement/disagreement signals between introspection and external evaluations before proposing prompt edits.
       - Summarize only what is needed for the target persona's system prompt.
       - Updates should be almost always additive to the current system prompt to preserve forward performance.
 
@@ -106,7 +113,7 @@ spec:
         - Expected impact on future performance
 
   base_prompt: |
-    Analyze workflow results and optimize the requested persona's prompt based on introspection and performance patterns.
+    Analyze workflow results and optimize the requested persona's prompt based on reported results, introspection, and grounded external evaluations.
     Prioritize conservative, evidence-based, section-level diffs over full rewrites.
 
   playbook: |

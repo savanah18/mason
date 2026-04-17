@@ -2,7 +2,6 @@ id: CHAT-AH-006.0
 chat-prompt: |
   Ad-hoc request: use kubernetes-mcp-server to confirm target deployment state,
   apply one bounded resource update, validate with a metrics snapshot, and publish one completion event.
-  Constraint: use up to 5 related tool calls.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
   # Pre-condition: namespace exists and has workloads available for bounded update.

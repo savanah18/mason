@@ -3,7 +3,6 @@ chat-prompt: |
   Ad-hoc request: inspect namespace infra for recent issues and configuration state.
   Use kubernetes-configuration_view first, then kubernetes-events_list for the same namespace.
   Summarize any notable configuration values and the most recent warning or restart events.
-  Constraint: use up to 2 related tool calls.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
   # Pre-condition: infra namespace should exist.

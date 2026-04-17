@@ -3,7 +3,7 @@ chat-prompt: |
   Please process a publish request for analytics-service in namespace analytics using chart bitnami/elasticsearch version 99.99.99.
   Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/elasticsearch .
   The requested version may not exist, so you may choose a fail-fast validation path or an install-attempt path with explicit remediation guidance.
-  Send the request as one Kafka event payload in JSON.
+  Send the request as a Kafka event payload in JSON. Resolve formatting issues and retry sending corrected event payload.
   Include the core fields from the request, and include workflow metadata if present.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID> and include extra_instruction in the same JSON payload.
 pre-condition-script: |

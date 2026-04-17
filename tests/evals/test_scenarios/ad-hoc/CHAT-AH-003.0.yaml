@@ -2,7 +2,6 @@ id: CHAT-AH-003.0
 chat-prompt: |
   Ad-hoc request: verify release finance in namespace finance,
   run helm tests, then publish one status event to Kafka topic tests.normal.
-  Constraint: use up to 3 related tool calls.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
   # Pre-condition: namespace and target release should exist for test execution.

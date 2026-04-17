@@ -3,7 +3,6 @@ chat-prompt: |
   Ad-hoc request: inspect the current Helm release state for victoria-metrics namespace.
   Use helm-list-releases first, then helm-get-values for the victoria-metrics release if present.
   Return a concise summary of the release status and whether resource values are set.
-  Constraint: use up to 2 related tool calls.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
   # Pre-condition: namespace should exist and release may or may not be present.

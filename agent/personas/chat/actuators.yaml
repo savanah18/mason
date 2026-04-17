@@ -36,7 +36,7 @@ spec:
   # - "helm-rollback"
   # - "helm-test"
   - "kafka-produce-message"
-  - "resource-collector"
+  # - "resource-collector"
   - "kubernetes-list-workloads"
   - "kubernetes-apply-resource-update"
   - "prompt-optimization-retrieve-workflows"

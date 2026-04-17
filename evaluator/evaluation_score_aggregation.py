@@ -30,6 +30,26 @@ NUMERIC_FIELDS = [
     "step_efficiency",
     "plan_adherence",
     "faithfulness",
+    "plan_quality_score",
+    "task_decomposition_accuracy",
+    "read_only_integrity",
+    "argument_hallucination_rate",
+]
+
+MOCK_PLAN_METRICS = [
+    "plan_quality_score",
+    "task_decomposition_accuracy",
+    "read_only_integrity",
+    "argument_hallucination_rate",
+]
+
+OTHER_METRICS = [
+    "overall_score",
+    "task_completion",
+    "tool_accuracy",
+    "step_efficiency",
+    "plan_adherence",
+    "faithfulness",
 ]
 
 VERDICTS = ["pass", "partial", "fail"]
@@ -85,6 +105,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional path to write batch summary as CSV",
     )
+    parser.add_argument(
+        "--run-mode",
+        choices=["mock-plan", "mock-test", "e2e"],
+        default="e2e",
+        help="Run mode: mock-plan (only planning metrics), mock-test (all except planning), e2e (all except planning) (default: e2e)",
+    )
     return parser.parse_args()
 
 
@@ -92,11 +118,12 @@ def get_batch_files(args: argparse.Namespace) -> list[Path]:
     if args.batch_files:
         files = [p if p.is_absolute() else Path.cwd() / p for p in args.batch_files]
     else:
-        files = sorted(args.batch_dir.glob(args.pattern))
+        batch_dir = args.batch_dir if args.batch_dir.is_absolute() else Path.cwd() / args.batch_dir
+        files = sorted(batch_dir.glob(args.pattern))
 
     existing_files = [p for p in files if p.exists() and p.is_file()]
     if not existing_files:
-        raise FileNotFoundError("No batch JSONL files found to aggregate")
+        raise FileNotFoundError(f"No batch JSONL files found in: {batch_dir if not args.batch_files else 'specified files'}")
     return existing_files
 
 
@@ -271,19 +298,35 @@ def summarize_batch(
     return summary
 
 
-def print_table(summaries: list[dict[str, Any]]) -> None:
+def print_table(summaries: list[dict[str, Any]], run_mode: str = "e2e") -> None:
+    # Determine which metrics to display based on run_mode
+    if run_mode == "mock-plan":
+        metric_fields = MOCK_PLAN_METRICS
+        metric_headers = [
+            "avg_plan_quality",
+            "avg_task_decomp",
+            "avg_read_only",
+            "avg_hallucination",
+        ]
+    else:
+        # mock-test and e2e show other metrics
+        metric_fields = OTHER_METRICS
+        metric_headers = [
+            "avg_score",
+            "avg_task",
+            "avg_tool",
+            "avg_step",
+            "avg_plan",
+            "avg_faith",
+        ]
+
     headers = [
         "batch",
         "records",
         "parsed",
         "errors",
         "redis_fetched",
-        "avg_score",
-        "avg_task",
-        "avg_tool",
-        "avg_step",
-        "avg_plan",
-        "avg_faith",
+    ] + metric_headers + [
         "pass",
         "partial",
         "fail",
@@ -294,18 +337,32 @@ def print_table(summaries: list[dict[str, Any]]) -> None:
     for item in summaries:
         batch_name = Path(item["batch_file"]).name
         verdicts = item.get("verdict_counts", {})
+        
+        metric_values = []
+        if run_mode == "mock-plan":
+            metric_values = [
+                "-" if item.get("avg_plan_quality_score") is None else f"{item['avg_plan_quality_score']:.2f}",
+                "-" if item.get("avg_task_decomposition_accuracy") is None else f"{item['avg_task_decomposition_accuracy']:.2f}",
+                "-" if item.get("avg_read_only_integrity") is None else f"{item['avg_read_only_integrity']:.2f}",
+                "-" if item.get("avg_argument_hallucination_rate") is None else f"{item['avg_argument_hallucination_rate']:.2f}",
+            ]
+        else:
+            metric_values = [
+                "-" if item.get("avg_overall_score") is None else f"{item['avg_overall_score']:.2f}",
+                "-" if item.get("avg_task_completion") is None else f"{item['avg_task_completion']:.2f}",
+                "-" if item.get("avg_tool_accuracy") is None else f"{item['avg_tool_accuracy']:.2f}",
+                "-" if item.get("avg_step_efficiency") is None else f"{item['avg_step_efficiency']:.2f}",
+                "-" if item.get("avg_plan_adherence") is None else f"{item['avg_plan_adherence']:.2f}",
+                "-" if item.get("avg_faithfulness") is None else f"{item['avg_faithfulness']:.2f}",
+            ]
+        
         row = [
             batch_name,
             str(item.get("total_records", 0)),
             str(item.get("parsed_records", 0)),
             str(item.get("parse_errors", 0)),
             str(item.get("redis_records_fetched", 0)),
-            "-" if item.get("avg_overall_score") is None else f"{item['avg_overall_score']:.2f}",
-            "-" if item.get("avg_task_completion") is None else f"{item['avg_task_completion']:.2f}",
-            "-" if item.get("avg_tool_accuracy") is None else f"{item['avg_tool_accuracy']:.2f}",
-            "-" if item.get("avg_step_efficiency") is None else f"{item['avg_step_efficiency']:.2f}",
-            "-" if item.get("avg_plan_adherence") is None else f"{item['avg_plan_adherence']:.2f}",
-            "-" if item.get("avg_faithfulness") is None else f"{item['avg_faithfulness']:.2f}",
+        ] + metric_values + [
             str(verdicts.get("pass", 0)),
             str(verdicts.get("partial", 0)),
             str(verdicts.get("fail", 0)),
@@ -469,7 +526,7 @@ def main() -> None:
         for batch_file in batch_files
     ]
 
-    print_table(summaries)
+    print_table(summaries, run_mode=args.run_mode)
     print_redis_stats_table(summaries)
     print_reference_table(summaries)
 

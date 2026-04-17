@@ -62,6 +62,73 @@ def load_text(path: Path) -> str:
         return handle.read().strip()
 
 
+def load_tool_catalog_from_jsonl(tool_files: list[Path]) -> list[dict[str, Any]]:
+    """Load tool definitions from one or more JSONL files."""
+    tools: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for tool_file in tool_files:
+        with tool_file.open("r", encoding="utf-8") as handle:
+            for line_number, raw_line in enumerate(handle, start=1):
+                line = raw_line.strip()
+                if not line:
+                    continue
+
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        f"Invalid JSON in {tool_file} line {line_number}: {exc}"
+                    ) from exc
+
+                if not isinstance(record, dict):
+                    continue
+
+                tool_name = record.get("tool_name")
+                if not isinstance(tool_name, str) or not tool_name.strip():
+                    continue
+
+                if tool_name in seen:
+                    continue
+                seen.add(tool_name)
+                tools.append(record)
+
+    return tools
+
+
+def format_tool_catalog_for_prompt(tools: list[dict[str, Any]]) -> str:
+    """Format a concise tool catalog section for system prompt injection."""
+    if not tools:
+        return "- No tool catalog provided"
+
+    lines: list[str] = []
+    for tool in tools:
+        tool_name = str(tool.get("tool_name", "unknown-tool"))
+        description = tool.get("description", "")
+
+        if isinstance(description, str) and description.strip():
+            lines.append(f"- {tool_name}: {description.strip()}")
+        else:
+            lines.append(f"- {tool_name}")
+
+        params = tool.get("parameters", [])
+        if isinstance(params, list) and params:
+            lines.append("  Parameters:")
+            for param in params:
+                if not isinstance(param, dict):
+                    continue
+                param_name = str(param.get("name", "unknown"))
+                param_type = str(param.get("type", "any"))
+                required = "required" if bool(param.get("required", False)) else "optional"
+                param_desc = param.get("description", "")
+                if isinstance(param_desc, str) and param_desc.strip():
+                    lines.append(f"  - {param_name} ({param_type}, {required}): {param_desc.strip()}")
+                else:
+                    lines.append(f"  - {param_name} ({param_type}, {required})")
+
+    return "\n".join(lines)
+
+
 def normalize_eval_record(raw_record: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(raw_record)
     for key in ("function_calls", "function_executions", "metadata", "stats"):
@@ -74,7 +141,11 @@ def normalize_eval_record(raw_record: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def build_system_prompt(goal: dict[str, Any], evaluation_prompt: str) -> str:
+def build_system_prompt(
+    goal: dict[str, Any],
+    evaluation_prompt: str,
+    available_tools: str,
+) -> str:
     # Support both Goal CRD files (spec.description) and prompt files (system/prompts).
     description = (
         goal.get("spec", {}).get("description")
@@ -87,6 +158,9 @@ def build_system_prompt(goal: dict[str, Any], evaluation_prompt: str) -> str:
 
 You are evaluating the agent's performance on the following general goal:
 {description}
+
+The agent you are evaluating has the following tool catalog available for use:
+{available_tools}
 
 You will be given the following information:
 - Task: The task given to the agent
@@ -410,6 +484,13 @@ def parse_args() -> argparse.Namespace:
         default=Path("../tests/evals"),
         help="Root directory for eval outputs",
     )
+    parser.add_argument(
+        "--agent-tool-files",
+        nargs="+",
+        type=Path,
+        default=None,
+        help="One or more JSONL files containing tool definitions for prompt injection",
+    )
     parser.add_argument("--model", default="gemini-3.1-flash-lite-preview", help="Gemini model to use for batch")
     parser.add_argument("--api-key", default=None, help="Google API key (fallback: GEMINI_API_KEY/GOOGLE_API_KEY)")
     parser.add_argument(
@@ -510,7 +591,18 @@ def main() -> None:
 
     goal = load_yaml(args.goal_file)
     evaluation_prompt = load_text(args.evaluation_prompt_file)
-    system_prompt = build_system_prompt(goal, evaluation_prompt)
+
+    tool_catalog_files = [
+        p if p.is_absolute() else Path.cwd() / p
+        for p in (args.agent_tool_files or [])
+    ]
+    for tool_file in tool_catalog_files:
+        if not tool_file.exists() or not tool_file.is_file():
+            raise FileNotFoundError(f"Agent tool file not found: {tool_file}")
+
+    tool_catalog = load_tool_catalog_from_jsonl(tool_catalog_files)
+    available_tools = format_tool_catalog_for_prompt(tool_catalog)
+    system_prompt = build_system_prompt(goal, evaluation_prompt, available_tools)
 
     # Determine cache name
     cache_name: str | None = args.cache_name

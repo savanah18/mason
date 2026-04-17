@@ -268,9 +268,19 @@ class PromptOptimizationRetrieveWorkflowResult(MemoryTraceableTool):
                     break
 
             matched_result: str | None = None
+            evaluations_exists = False
+            evaluations: Any = None
             if matched_workflow is not None:
                 raw_result = matched_workflow.get("result")
                 matched_result = raw_result if isinstance(raw_result, str) else None
+
+                raw_evaluations = matched_workflow.get("evaluations")
+                if isinstance(raw_evaluations, str) and raw_evaluations.strip():
+                    evaluations_exists = True
+                    try:
+                        evaluations = json.loads(raw_evaluations)
+                    except Exception:
+                        evaluations = raw_evaluations
 
             result = {
                 "success": True,
@@ -279,6 +289,8 @@ class PromptOptimizationRetrieveWorkflowResult(MemoryTraceableTool):
                 "persona": matched_persona,
                 "key": matched_key,
                 "result": matched_result,
+                "evaluations_exists": evaluations_exists,
+                "evaluations": evaluations,
                 "exec_id": exec_id,
             }
 

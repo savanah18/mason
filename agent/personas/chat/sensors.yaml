@@ -2,17 +2,16 @@
 apiVersion: agents/v1
 kind: Sensors
 metadata:
-  name: prompt-optimizer-sensors
+  name: chat-sensors
   labels:
-    app: prompt-optimizer-sensors
+    app: chat-sensors
     type: autonomous
 spec:
   - type: KafkaEventListener
     config_type: KafkaEventListenerConfig
     bootstrap_servers:
     - kafka-server:9092
-    group_id: prompt-optimizer
+    group_id: chat
     auto_offset_reset: earliest
     topics:
-    - prompt-opt.*
-    - system.prompt-optimizer
+    - topics.chat

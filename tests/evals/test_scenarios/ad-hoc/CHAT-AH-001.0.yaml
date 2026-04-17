@@ -2,7 +2,6 @@ id: CHAT-AH-001.0
 chat-prompt: |
   Ad-hoc request: show a compact workload inventory for media-microservices namespace.
   Return deployment/statefulset/daemonset counts and key cpu/memory settings.
-  Constraint: use exactly 1 related tool call.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
   # Pre-condition: media-microservices namespace should be available.

@@ -4,7 +4,6 @@ chat-prompt: |
   Use kubernetes-list-workloads first, then resource-collector for finance namespace.
   Keep metrics acquisition simple: one namespace, one snapshot, one short summary.
   Return only the top workloads by requested CPU and memory plus any notable namespace settings.
-  Constraint: use up to 2 related tool calls.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
 pre-condition-script: |
   # Pre-condition: finance namespace should exist.

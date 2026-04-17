@@ -1,0 +1,91 @@
+id: CHAT-AH-018.0
+chat-prompt: |
+  Incident resolution request: recover from a namespace policy change that is making a normal rollout too expensive.
+  Inspect the current namespace policy and workload state, then adjust the workload so it fits the policy and stays healthy.
+  Keep the remediation conservative and explain why the chosen change is safe.
+  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
+pre-condition-script: |
+  # Simulate policy-induced rollout friction in a dedicated namespace.
+  kubectl delete ns incident-resolution --ignore-not-found=true
+  kubectl wait --for=delete namespace/incident-resolution --timeout=120s || true
+  kubectl create ns incident-resolution
+  kubectl apply -f - <<EOF
+  apiVersion: v1
+  kind: ResourceQuota
+  metadata:
+    name: incident-resolution-quota
+    namespace: incident-resolution
+  spec:
+    hard:
+      requests.cpu: "250m"
+      requests.memory: "256Mi"
+      limits.cpu: "500m"
+      limits.memory: "512Mi"
+      pods: "1"
+  EOF
+  kubectl apply -f - <<EOF
+  apiVersion: v1
+  kind: LimitRange
+  metadata:
+    name: incident-resolution-defaults
+    namespace: incident-resolution
+  spec:
+    limits:
+    - type: Container
+      default:
+        cpu: 200m
+        memory: 256Mi
+      defaultRequest:
+        cpu: 150m
+        memory: 192Mi
+  EOF
+  kubectl apply -f - <<EOF
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: incident-worker
+    namespace: incident-resolution
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: incident-worker
+    template:
+      metadata:
+        labels:
+          app: incident-worker
+      spec:
+        containers:
+        - name: app
+          image: nginx:1.27
+  EOF
+  kubectl rollout status deploy/incident-worker -n incident-resolution --timeout=120s || true
+execution-script: |
+  export CHAT_ENDPOINT=127.0.0.1:8002
+  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+
+  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  echo CHAT_PROMPT: ${CHAT_PROMPT}
+  echo SESSION_ID: ${SESSION_ID}
+
+  json_payload=$(jq -n \
+  --arg message "$CHAT_PROMPT" \
+  --arg session_id "$SESSION_ID" \
+  --arg workflow_id "$WORKFLOW_ID" \
+  '{message: $message, session_id: $session_id, workflow_id: $workflow_id}')
+
+  curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+    -H "Content-Type: application/json" \
+    -d "$json_payload"
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=chat
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} $PERSONA
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  helm uninstall incident-worker -n incident-resolution || true
+  kubectl delete resourcequota incident-resolution-quota -n incident-resolution --ignore-not-found=true || true
+  kubectl delete limitrange incident-resolution-defaults -n incident-resolution --ignore-not-found=true || true
+  kubectl delete ns incident-resolution --ignore-not-found=true
+  kubectl wait --for=delete namespace/incident-resolution --timeout=120s || true

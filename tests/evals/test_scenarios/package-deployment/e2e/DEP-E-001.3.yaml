@@ -3,7 +3,7 @@ chat-prompt: |
   Please process a fresh install for media-api in namespace media.
   Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10. .
   If the release already exists, you may choose no-op confirmation or upgrade-readiness based on observed state.
-  Send the request as one Kafka event payload in JSON.
+  Send the request as a Kafka event payload in JSON. Resolve formatting issues and retry sending corrected event payload.
   Include the core fields from the request, and include workflow metadata if present.
   If workflow metadata is injected, use workflow_id as <WORKFLOW_ID> and include extra_instruction in the same JSON payload.
 pre-condition-script: |
@@ -14,23 +14,25 @@ pre-condition-script: |
   helm uninstall media-api -n media || true
   helm install media-api oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10. --version 22.6.10 -n media || true
 execution-script: |
-  export CHAT_ENDPOINT=127.0.0.1:8002
-  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
-
-  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
-  echo CHAT_PROMPT: ${CHAT_PROMPT}
-  echo SESSION_ID: ${SESSION_ID}
-
-  # Construct payload
-  json_payload=$(jq -n \
-  --arg message "$CHAT_PROMPT" \
-  --arg session_id "$SESSION_ID" \
-  '{message: $message, session_id: $session_id}')
-
-  # Send it with curl
-  curl -X POST "${CHAT_ENDPOINT}/chat/send" \
-    -H "Content-Type: application/json" \
-    -d "$json_payload"
+  # Legacy chat transport path disabled for direct agent testing:
+  # export CHAT_ENDPOINT=127.0.0.1:8002
+  # SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+  #
+  # echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  # echo CHAT_PROMPT: ${CHAT_PROMPT}
+  # echo SESSION_ID: ${SESSION_ID}
+  #
+  # # Construct payload
+  # json_payload=$(jq -n \
+  # --arg message "$CHAT_PROMPT" \
+  # --arg session_id "$SESSION_ID" \
+  # '{message: $message, session_id: $session_id}')
+  #
+  # # Send it with curl
+  # curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+  #   -H "Content-Type: application/json" \
+  #   -d "$json_payload"
+  python3 tools/mock_plan_kafka_test_runner.py
 expected-execution-time: "600"
 output-retrieval-script: |
   PERSONA=deployer

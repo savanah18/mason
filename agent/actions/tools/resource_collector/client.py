@@ -28,7 +28,11 @@ class PromQLClient:
             or DEFAULT_PROMQL_ENDPOINT
         )
         self.verify_ssl = verify_ssl
-        self._client = PrometheusConnect(url=self.endpoint, disable_ssl=not verify_ssl)
+        self._client = PrometheusConnect(
+            url=self.endpoint, 
+            disable_ssl=not verify_ssl,
+
+        )
 
     def query(
         self,

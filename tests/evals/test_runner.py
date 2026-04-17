@@ -56,11 +56,26 @@ def run_workflow(yaml_file: str, test_id: str, date_str: str, workflow_ids_list:
     print(workflow.get("pre-condition-script", ""))
     run_script(workflow.get("pre-condition-script", ""), env)
 
-    print("Running execution script...")
-    run_script(workflow.get("execution-script", ""), env)
+    workflow_error = None
+    try:
+        print("Running execution script...")
+        run_script(workflow.get("execution-script", ""), env)
 
-    print("Running output retrieval script...")
-    run_script(workflow.get("output-retrieval-script", ""), env)
+        print("Running output retrieval script...")
+        run_script(workflow.get("output-retrieval-script", ""), env)
+    except subprocess.CalledProcessError as e:
+        workflow_error = e
+    finally:
+        try:
+            print("Running post condition script...")
+            run_script(workflow.get("post-condition-script", ""), env)
+        except subprocess.CalledProcessError as post_err:
+            if workflow_error is None:
+                raise
+            print(f"Post-condition script also failed: {post_err}")
+
+    if workflow_error is not None:
+        raise workflow_error
 
 
 def find_matching_scenarios(regex_prefix: str):
