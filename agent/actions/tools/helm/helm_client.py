@@ -50,11 +50,11 @@ class HelmRevision:
 class HelmClient:
     """Async wrapper around helm CLI commands."""
 
-    def __init__(self, timeout: int = 120):
+    def __init__(self, timeout: int = 300):
         """Initialize HelmClient.
         
         Args:
-            timeout: Command execution timeout in seconds
+            timeout: Command execution timeout in seconds (default: 300s)
         """
         self.timeout = timeout
 
@@ -148,6 +148,38 @@ class HelmClient:
                 "raw_output": ""
             }
 
+    def _stringify_helm_set_value(self, value: Any) -> str:
+        """Convert Python values to Helm-compatible --set string values."""
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if value is None:
+            return "null"
+        return str(value)
+
+    def _flatten_values_for_set(self, prefix: str, value: Any) -> List[str]:
+        """Flatten nested values into Helm --set key=value expressions."""
+        if isinstance(value, dict):
+            flattened: List[str] = []
+            for key, nested_value in value.items():
+                nested_prefix = f"{prefix}.{key}" if prefix else str(key)
+                flattened.extend(self._flatten_values_for_set(nested_prefix, nested_value))
+            return flattened
+
+        if isinstance(value, list):
+            flattened = []
+            for index, nested_value in enumerate(value):
+                nested_prefix = f"{prefix}[{index}]"
+                flattened.extend(self._flatten_values_for_set(nested_prefix, nested_value))
+            return flattened
+
+        return [f"{prefix}={self._stringify_helm_set_value(value)}"]
+
+    def _extend_set_args(self, args: List[str], values: Dict[str, Any]) -> None:
+        """Append recursive --set args for values payload."""
+        for key, value in values.items():
+            for set_expr in self._flatten_values_for_set(str(key), value):
+                args.extend(["--set", set_expr])
+
     async def list_releases(
         self,
         namespace: Optional[str] = None,
@@ -216,14 +248,7 @@ class HelmClient:
             args.extend(["--version", version])
 
         if values:
-            # Create a temporary values file or use --set
-            for key, value in values.items():
-                if isinstance(value, dict):
-                    # Handle nested values
-                    for subkey, subvalue in value.items():
-                        args.extend(["--set", f"{key}.{subkey}={subvalue}"])
-                else:
-                    args.extend(["--set", f"{key}={value}"])
+            self._extend_set_args(args, values)
         
         result = await self._run_helm(args, check_error=False)
         
@@ -424,12 +449,7 @@ class HelmClient:
             args.extend(["--version", version])
         
         if values:
-            for key, value in values.items():
-                if isinstance(value, dict):
-                    for subkey, subvalue in value.items():
-                        args.extend(["--set", f"{key}.{subkey}={subvalue}"])
-                else:
-                    args.extend(["--set", f"{key}={value}"])
+            self._extend_set_args(args, values)
         
         result = await self._run_helm(args, check_error=False)
         return self._build_command_result(
@@ -446,7 +466,7 @@ class HelmClient:
         namespace: str = "default",
         values: Optional[Dict[str, Any]] = None,
         wait: bool = True,
-        install: bool = False,
+        install: bool = True,
         version: Optional[str] = None
     ) -> Dict[str, Any]:
         """Upgrade Helm release.
@@ -459,12 +479,14 @@ class HelmClient:
             wait: Wait for resources to be ready
             install: Install if release doesn't exist
             version: Optional chart version (for repo or OCI charts)
+            Uses atomic mode so failed upgrades are rolled back automatically
             
         Returns:
             True if successful
         """
         args = ["upgrade", release_name, chart]
         args.extend(["-n", namespace])
+        args.append("--atomic")
         
         if wait:
             args.append("--wait")
@@ -476,12 +498,7 @@ class HelmClient:
             args.extend(["--version", version])
         
         if values:
-            for key, value in values.items():
-                if isinstance(value, dict):
-                    for subkey, subvalue in value.items():
-                        args.extend(["--set", f"{key}.{subkey}={subvalue}"])
-                else:
-                    args.extend(["--set", f"{key}={value}"])
+            self._extend_set_args(args, values)
         
         result = await self._run_helm(args, check_error=True)
         return self._build_command_result(

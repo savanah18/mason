@@ -370,13 +370,7 @@ class HelmTemplate(MemoryTraceableTool):
             'type': 'string',
             'description': 'Target namespace for rendering (default: "default")',
             'required': False
-        },
-        {
-            'name': 'values',
-            'type': 'string',
-            'description': 'JSON string of values to override (e.g., \'{"replicas": 3, "image": {"tag": "1.2.0"}}\')',
-            'required': False
-        },
+        }
     ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
@@ -388,8 +382,8 @@ class HelmTemplate(MemoryTraceableTool):
                 exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
-                values = None
-                if args.get('values'):
+                values = args.get('values')
+                if args.get('values') and not isinstance(values, dict):
                     values = json5.loads(args['values'])
                 
                 manifests = await client.template(
@@ -498,7 +492,7 @@ class HelmInstall(MemoryTraceableTool):
         {
             'name': 'chart',
             'type': 'string',
-            'description': 'Chart reference (e.g., "bitnami/nginx")',
+            'description': 'Chart reference',
             'required': True
         },
         {
@@ -515,14 +509,14 @@ class HelmInstall(MemoryTraceableTool):
         },
         {
             'name': 'values',
-            'type': 'string',
-            'description': 'JSON string of custom values (e.g., \'{"replicas": 3, "resources": {"limits": {"cpu": "500m"}}}\')',
+            'type': 'object',
+            'description': 'Map of custom values for the chart. This should be a JSON object with key-value pairs corresponding to the chart\'s values.yaml structure.',
             'required': False
         },
         {
             'name': 'create_namespace',
             'type': 'string',
-            'description': 'Create namespace if it does not exist (true/false, default: true)',
+            'description': 'Create namespace if it does not exist ("true"/"false", default: "true")',
             'required': False
         },
     ] + TRACEABILITY_PARAMS_ADD_ONS
@@ -536,8 +530,8 @@ class HelmInstall(MemoryTraceableTool):
                 exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
-                values = None
-                if args.get('values'):
+                values = args.get('values')
+                if args.get('values') and not isinstance(values, dict):
                     values = json5.loads(args['values'])
                 
                 create_ns = args.get('create_namespace', 'true').lower() == 'true'
@@ -584,7 +578,7 @@ class HelmUpgrade(MemoryTraceableTool):
         {
             'name': 'chart',
             'type': 'string',
-            'description': 'Chart reference (e.g., "bitnami/nginx")',
+            'description': 'Chart reference',
             'required': True
         },
         {
@@ -601,8 +595,8 @@ class HelmUpgrade(MemoryTraceableTool):
         },
         {
             'name': 'values',
-            'type': 'string',
-            'description': 'JSON string of new values to set',
+            'type': 'object',
+            'description': 'Map of custom values for the chart. This should be a JSON object with key-value pairs corresponding to the chart\'s values.yaml structure.',
             'required': False
         },
         {
@@ -622,8 +616,8 @@ class HelmUpgrade(MemoryTraceableTool):
                 exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
-                values = None
-                if args.get('values'):
+                values = args.get('values')
+                if args.get('values') and not isinstance(values, dict):
                     values = json5.loads(args['values'])
                 
                 install_flag = args.get('install', 'true').lower() == 'true'

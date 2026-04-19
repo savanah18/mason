@@ -2,6 +2,7 @@
 
 import json
 import os
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import json5
@@ -28,13 +29,13 @@ def parse_params(params: Any) -> Dict[str, Any]:
 
 
 def _agents_enabled_for_optimization() -> List[str]:
-    raw = os.getenv("AGENTS_ENABLED_FOR_OPTIMIZATION", "deployer,resiliency-optimizer")
+    raw = os.getenv("AGENTS_ENABLED_FOR_OPTIMIZATION", "deployer,resiliency-optimizer,chat")
     return [agent.strip() for agent in raw.split(",") if agent.strip()]
 
 
 def _prompt_opt_batch_size() -> int:
     try:
-        return max(1, int(os.getenv("PROMPT_OPT_NUM_BATCH", "8")))
+        return max(1, int(os.getenv("PROMPT_OPT_NUM_BATCH", "16")))
     except Exception:
         return 8
 
@@ -69,6 +70,19 @@ def _get_latest_prompt_created_at(redis_client: redis.Redis, persona: str) -> st
 
     created_at = metadata.get("created_at")
     return created_at if isinstance(created_at, str) and created_at.strip() else None
+
+
+def _workflow_has_evaluations(workflow: Dict[str, Any]) -> bool:
+    """Return True if workflow has a meaningful evaluations payload."""
+    raw_evaluations = workflow.get("evaluations")
+    if not isinstance(raw_evaluations, str) or not raw_evaluations.strip():
+        return False
+
+    try:
+        parsed = json.loads(raw_evaluations)
+        return parsed not in (None, {}, [], "")
+    except Exception:
+        return True
 
 
 @register_tool("prompt-optimization-retrieve-workflows")
@@ -117,58 +131,70 @@ class PromptOptimizationRetrieveWorkflows(MemoryTraceableTool):
                 max_results = _prompt_opt_batch_size()
 
             enabled_agents = _agents_enabled_for_optimization()
-            agents = _resolve_target_personas(args.get("persona"), enabled_agents)
+            persona_arg = args.get("persona")
+            if not isinstance(persona_arg, str) or not persona_arg.strip():
+                raise ValueError("persona is required and must be a non-empty string")
+            persona = persona_arg.strip()
+            if persona not in set(enabled_agents):
+                raise ValueError(
+                    f"persona '{persona}' is not enabled for optimization: {enabled_agents}"
+                )
+
             r = redis.Redis(host="redis", port=6379, decode_responses=True)
-            requested_reference = f'system-prompts:{args.get("persona")}:{args.get("reference")}'
-            if not isinstance(requested_reference, str):
-                requested_reference = None
-            elif not requested_reference.strip():
-                requested_reference = None
+            raw_reference = args.get("reference")
+            if isinstance(raw_reference, str) and raw_reference.strip():
+                requested_reference = raw_reference.strip()
             else:
-                requested_reference = requested_reference.strip()
+                requested_reference = None
 
             workflow_ids: List[str] = []
-            latest_prompt_created_at: Dict[str, str | None] = {
-                persona: _get_latest_prompt_created_at(r, persona) for persona in agents
+            workflows_with_evaluations = 0
+            latest_prompt_created_at = {
+                persona: _get_latest_prompt_created_at(r, persona)
             }
-            effective_reference: Dict[str, str | None] = {
+            effective_reference = {
                 persona: requested_reference or latest_prompt_created_at.get(persona)
-                for persona in agents
             }
 
-            for persona in agents:
-                if len(workflow_ids) >= max_results:
-                    break
+            target_reference = effective_reference.get(persona)
+            key_pattern = f"workflow:*:{persona}:*"
+            print("DEBUG",target_reference) 
 
-                key_pattern = f"workflow:*:{persona}:*"
-                target_reference = effective_reference.get(persona)
-                for key in r.scan_iter(match=key_pattern):
-                    if len(workflow_ids) >= max_results:
-                        break
+            persona_eval_workflow_ids: List[str] = []
+            persona_non_eval_workflow_ids: List[str] = []
 
-                    workflow = r.hgetall(key) or {}
-                    optimization_raw = workflow.get("optimization")
+            for key in r.scan_iter(match=key_pattern):
+                workflow = r.hgetall(key) or {}
+                optimization_raw = workflow.get("optimization")
 
-                    include = False
-                    if optimization_raw and target_reference:
-                        try:
-                            optimization = json.loads(optimization_raw)
-                            include = optimization.get("reference") == target_reference
-                        except Exception:
-                            include = False
-
-                    if not include:
-                        continue
-
-                    metadata: Dict[str, Any] = {}
+                include = False
+                if optimization_raw and target_reference:
                     try:
-                        metadata = json.loads(workflow.get("metadata", "{}"))
+                        optimization = json.loads(optimization_raw)
+                        include = optimization.get("reference") == f"system-prompts:{persona}:{target_reference}"
                     except Exception:
-                        metadata = {}
+                        include = False
 
-                    workflow_id = metadata.get("workflow_id")
-                    if isinstance(workflow_id, str) and workflow_id.strip():
-                        workflow_ids.append(workflow_id)
+                if not include:
+                    continue
+
+                metadata: Dict[str, Any] = {}
+                try:
+                    metadata = json.loads(workflow.get("metadata", "{}"))
+                except Exception:
+                    metadata = {}
+
+                workflow_id = metadata.get("workflow_id")
+                if isinstance(workflow_id, str) and workflow_id.strip():
+                    if _workflow_has_evaluations(workflow):
+                        persona_eval_workflow_ids.append(workflow_id)
+                    else:
+                        persona_non_eval_workflow_ids.append(workflow_id)
+
+            ordered_persona_ids = persona_eval_workflow_ids + persona_non_eval_workflow_ids
+            selected_ids = ordered_persona_ids[:max_results]
+            workflow_ids.extend(selected_ids)
+            workflows_with_evaluations += min(len(persona_eval_workflow_ids), len(selected_ids))
 
             result = {
                 "success": True,
@@ -176,6 +202,7 @@ class PromptOptimizationRetrieveWorkflows(MemoryTraceableTool):
                 "latest_prompt_created_at": latest_prompt_created_at,
                 "effective_reference": effective_reference,
                 "num_retrieved": len(workflow_ids),
+                "num_with_evaluations": workflows_with_evaluations,
                 "workflow_ids": workflow_ids,
                 "exec_id": exec_id,
             }
@@ -351,14 +378,14 @@ class PromptOptimizationRetrieveSystemPrompt(MemoryTraceableTool):
                     f"persona '{persona}' is not enabled for optimization: {enabled_agents}"
                 )
 
-            requested_reference = f'system-prompts:{args.get("persona")}:{args.get("reference")}'
+            requested_reference = f'system-prompts:{args.get("persona")}:{args.get("reference", "latest")}'
             if not isinstance(requested_reference, str) or not requested_reference.strip():
                 requested_reference = None
             else:
                 requested_reference = requested_reference.strip()
 
-            effective_reference = requested_reference or "latest"
-            key = f"system-prompts:{persona}:{effective_reference}"
+            effective_reference = requested_reference
+            key = effective_reference
 
             r = redis.Redis(host="redis", port=6379, decode_responses=True)
             prompt_data = r.hgetall(key) or {}
@@ -375,6 +402,8 @@ class PromptOptimizationRetrieveSystemPrompt(MemoryTraceableTool):
                         metadata = parsed
                 except Exception:
                     metadata = None
+            
+            feedback = prompt_data.get("feedback", "No feedback found.")
 
             result = {
                 "success": True,
@@ -385,9 +414,115 @@ class PromptOptimizationRetrieveSystemPrompt(MemoryTraceableTool):
                 "found": found,
                 "prompt": prompt_text if found else None,
                 "metadata": metadata,
+                "feedback": feedback,
                 "exec_id": exec_id,
             }
 
+            self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
+            return json.dumps(result, ensure_ascii=False)
+        except Exception as exc:
+            result = {
+                "success": False,
+                "error": str(exc),
+                "exec_id": exec_id,
+            }
+            if exec_id is not None:
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
+            return json.dumps(result, ensure_ascii=False)
+
+
+@register_tool("prompt-optimization-write-candidate-prompt")
+class PromptOptimizationWriteCandidatePrompt(MemoryTraceableTool):
+    """Write updated candidate prompt for a workflow into Redis."""
+
+    tool_name = "prompt-optimization-write-candidate-prompt"
+
+    description = (
+        "Write candidate prompt data into Redis hash key "
+        "prompt-optimization:candidate-prompts:<persona>:<workflow-id>."
+    )
+
+    parameters = [
+        {
+            "name": "persona",
+            "type": "string",
+            "description": "Target persona for the candidate prompt.",
+            "required": True,
+        },
+        {
+            "name": "workflow_id",
+            "type": "string",
+            "description": "Workflow identifier for the candidate prompt record.",
+            "required": True,
+        },
+        {
+            "name": "updated_prompt",
+            "type": "string",
+            "description": "Updated prompt text.",
+            "required": True,
+        },
+        {
+            "name": "original_prompt",
+            "type": "string",
+            "description": "Original prompt reference id.",
+            "required": True,
+        },
+        {
+            "name": "created_by",
+            "type": "string",
+            "description": "Creator tag. Defaults to 'prompt_optimizer'.",
+            "required": False,
+        },
+    ] + TRACEABILITY_PARAMS_ADD_ONS
+
+    def call(self, params: str, **kwargs) -> str:
+        args = {}
+        exec_id = None
+        try:
+            args = parse_params(params)
+            exec_id = self._pre_call(self.tool_name, args)
+
+            persona = args.get("persona")
+            workflow_id = args.get("workflow_id")
+            updated_prompt = args.get("updated_prompt")
+            original_prompt = args.get("original_prompt")
+
+            if not isinstance(persona, str) or not persona.strip():
+                raise ValueError("persona is required and must be a non-empty string")
+            persona = persona.strip()
+
+            if not isinstance(workflow_id, str) or not workflow_id.strip():
+                raise ValueError("workflow_id is required and must be a non-empty string")
+            workflow_id = workflow_id.strip()
+
+            if not isinstance(updated_prompt, str) or not updated_prompt.strip():
+                raise ValueError("updated_prompt is required and must be a non-empty string")
+
+            if not isinstance(original_prompt, str) or not original_prompt.strip():
+                raise ValueError("original_prompt is required and must be a non-empty string")
+
+            created_by = args.get("created_by", "prompt_optimizer")
+            if not isinstance(created_by, str) or not created_by.strip():
+                created_by = "prompt_optimizer"
+
+            created_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            key = f"prompt-optimization:candidate-prompts:{persona}:{workflow_id}"
+            payload = {
+                "updated_prompt": updated_prompt,
+                "original_prompt": original_prompt,
+                "created_at": created_at,
+                "created_by": created_by.strip(),
+            }
+
+            r = redis.Redis(host="redis", port=6379, decode_responses=True)
+            r.hset(key, mapping=payload)
+
+            result = {
+                "success": True,
+                "key": key,
+                "stored": payload,
+                "exec_id": exec_id,
+            }
             self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
             return json.dumps(result, ensure_ascii=False)
         except Exception as exc:
