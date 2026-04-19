@@ -1,5 +1,6 @@
 # Templates Module Dependencies
 pyyaml==6.0.3
+ruamel.yaml==0.18.10
 python-dateutil==2.9.0post0
 
 # LLM specific
@@ -18,4 +19,4 @@ redis==7.4.0
 kafka-python==2.3.0
 prometheus-api-client==0.6.0
 mcp==1.12.4
-uv==0.10.4
+# uv==0.10.4

@@ -239,8 +239,8 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         #         Current workflow ID: {workflow_id}
         #         DO NOT execute any tools, this is a test workflow to verify agent planning capabilities.
         #         I repeat **DO NOT EXECUTE ANY TOOLS**. Just return the plan of which tools would have been executed in a structured format.
-        #         **Skip** pre-checks when in Plan Mode.
-        #         Action: Executed instruction from perceived event.
+        #         **IMPORTANT** SKIP pre-checks tools when in Plan Mode.
+        #         Action: Plan instructions from perceived event.
         #     """
         # }
 
@@ -284,6 +284,7 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
             task_total_token_cost = task_prompt_token_cost + task_gen_token_cost
 
             assistant_response = response[-1]['content'] # Most workflow agent answer are now in markdown format. 
+            
         except Exception as e:
             assistant_response = f"Error: {type(e)} {str(e)}"
         #****************** END OF WORKFLOW ******************

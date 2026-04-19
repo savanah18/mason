@@ -102,7 +102,7 @@ class ChatAgentBackend(BaseAgent, MemoryManagementMixin):
                 prompts = yaml.safe_load(f)
         except Exception as e:
             prompts = {"system": ""}
-        print(f"✓ Qwen Agent initialized with the following prompts.\n {prompts}")
+        #print(f"✓ Qwen Agent initialized with the following prompts.\n {prompts}")
         return prompts
     
 
@@ -167,7 +167,7 @@ class ChatAgentBackend(BaseAgent, MemoryManagementMixin):
 
         print("User message: ", user_message)
         # Add user message to history
-        session.messages.append({"role": "user", "content": user_message})
+        session.messages.append({"role": "user", "content": f"{user_message}" })
         messages = [m.dict() if type(m)!=dict else m for m in session.messages]
         user_index_flag = len(messages) - 1
         print(f"📝 After adding user message: {len(messages)} messages in history")
@@ -187,11 +187,15 @@ class ChatAgentBackend(BaseAgent, MemoryManagementMixin):
             # TODO TEST Measure task cost (tokens)
             # TODO add token cost, latency, etc. in record
             gen_time = datetime.now()
-            for response in self.agent.run(messages=messages):
-                if ttft is None:
-                    ttft = datetime.now() - gen_time
-                    print(f"⏱️ Time to first token: {ttft.seconds + ttft.microseconds/1e6} seconds")
-                tmp = typewriter_print(response, tmp) # for visual purposes 
+            try:
+                for response in self.agent.run(messages=messages):
+                    if ttft is None:
+                        ttft = datetime.now() - gen_time
+                        print(f"⏱️ Time to first token: {ttft.seconds + ttft.microseconds/1e6} seconds")
+                    tmp = typewriter_print(response, tmp) # for visual purposes 
+            except Exception as e:
+                print(f"Error during agent response generation: {e}")
+                raise e
             gen_latency = datetime.now() - gen_time
 
             structured_responses = response 
