@@ -2,7 +2,7 @@
   "name": "ai-chat-assistant",
   "displayName": "AI Chat Assistant",
   "description": "OpenAPI-compatible AI chat assistant with support for various inference backends including TensorRT-LLM, vLLM, OpenAI, and more.",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "publisher": "your-publisher",
   "engines": {
     "vscode": "^1.87.0"
@@ -12,7 +12,14 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:aiChat.start",
+    "onCommand:aiChat.openChat",
+    "onCommand:ai.openchat",
+    "onCommand:aichat.openChat",
+    "onCommand:aiChat.notificationsStatus",
+    "onCommand:aiChat.notificationsRestart",
+    "onCommand:aiChat.testNotification"
   ],
   "contributes": {
     "commands": [
@@ -23,8 +30,89 @@
       {
         "command": "aiChat.openChat",
         "title": "AI Chat: Open Chat Assistant"
+      },
+      {
+        "command": "ai.openchat",
+        "title": "AI Chat: Open Chat Assistant (Alias)"
+      },
+      {
+        "command": "aichat.openChat",
+        "title": "AI Chat: Open Chat Assistant (Alias)"
+      },
+      {
+        "command": "aiChat.notificationsStatus",
+        "title": "AI Chat: Notifications Status"
+      },
+      {
+        "command": "aiChat.notificationsRestart",
+        "title": "AI Chat: Notifications Restart"
+      },
+      {
+        "command": "aiChat.testNotification",
+        "title": "AI Chat: Test Notification"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "AI Chat Notifications",
+      "properties": {
+        "aiChat.notifications.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable background Kafka listener for VS Code notifications."
+        },
+        "aiChat.notifications.kafkaBrokers": {
+          "type": "string",
+          "default": "localhost:9092",
+          "description": "Comma-separated Kafka brokers for notification listener."
+        },
+        "aiChat.notifications.topic": {
+          "type": "string",
+          "default": "ai.notifications",
+          "description": "Kafka topic name to subscribe for notifications."
+        },
+        "aiChat.notifications.groupId": {
+          "type": "string",
+          "default": "ai-chat-vscode",
+          "description": "Kafka consumer group id for notification listener."
+        },
+        "aiChat.notifications.clientId": {
+          "type": "string",
+          "default": "ai-chat-vscode",
+          "description": "Kafka client id for notification listener."
+        },
+        "aiChat.notifications.fromBeginning": {
+          "type": "boolean",
+          "default": false,
+          "description": "Consume topic from beginning when enabled."
+        },
+        "aiChat.notifications.ssl": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable SSL when connecting to Kafka brokers."
+        },
+        "aiChat.notifications.saslMechanism": {
+          "type": "string",
+          "default": "plain",
+          "enum": ["plain", "scram-sha-256", "scram-sha-512"],
+          "description": "Kafka SASL mechanism to use when username/password are provided."
+        },
+        "aiChat.notifications.username": {
+          "type": "string",
+          "default": "",
+          "description": "Kafka SASL username for notification listener."
+        },
+        "aiChat.notifications.password": {
+          "type": "string",
+          "default": "",
+          "description": "Kafka SASL password for notification listener."
+        },
+        "aiChat.notifications.ackEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Optional HTTP endpoint to receive notification seen/ack events."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -32,7 +120,7 @@
     "compile": "npm run prepare-media && tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "echo 'No lint configured'",
-    "package": "vsce package || echo 'Install vsce to package'"
+    "package": "vsce package"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
@@ -40,6 +128,7 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
+    "kafkajs": "^2.2.4",
     "marked": "^17.0.4"
   }
 }

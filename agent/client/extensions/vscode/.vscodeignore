@@ -2,6 +2,7 @@
 .vscode-test
 .vscode-test-insiders
 node_modules
+!node_modules/kafkajs/**
 out/test
 src/test
 .gitignore
