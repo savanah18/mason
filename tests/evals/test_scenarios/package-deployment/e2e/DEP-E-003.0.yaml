@@ -3,9 +3,7 @@ chat-prompt: |
   Please process a publish request for search-api in namespace search. 
   Use OCI registry chart reference 'oci://registry-1.docker.io/bitnamicharts/postgresql' version 18.5.14 
   This is expected to be idempotent, so you may choose a fast no-op check or a more detailed confirmation path.
-  Send the request as a Kafka event payload in JSON. Resolve formatting issues and retry sending corrected event payload.
-  Include the core fields from the request, and include workflow metadata if present.
-  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID> and include extra_instruction in the same JSON payload.
+
 pre-condition-script: |
   # Pre-condition: same target version is already deployed.
   echo "Skipping helm repo add: using OCI charts"

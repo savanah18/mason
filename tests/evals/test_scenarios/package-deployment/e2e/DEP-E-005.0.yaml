@@ -3,9 +3,7 @@ chat-prompt: |
   Please process an update for cache-layer in namespace infra using chart bitnamicharts/memcached version 8.3.7.
   Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/memcached .
   You may choose a speed-prioritized or stability-prioritized upgrade path depending on observed runtime state.
-  Send the request as a Kafka event payload in JSON. Resolve formatting issues and retry sending corrected event payload.
-  Include the core fields from the request, and include workflow metadata if present.
-  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID> and include extra_instruction in the same JSON payload.
+
 pre-condition-script: |
   # Pre-condition: existing release requires quick version bump.
   echo "Skipping helm repo add: using OCI charts"
