@@ -6,17 +6,17 @@ metadata:
     app: package-deployer-actuators
     type: autonomous
 spec:
-  mcp-servers:
+  mcp-servers: {}
     kubernetes:
       type: "streamable-http"
       url: "http://kubernetes-mcp-server:8081/mcp"
       sse_read_timeout: 30
   builtin-functions:
-  - "helm-add-repository"
-  - "helm-registry-login"
-  - "helm-update-repositories"
-  - "helm-list-repositories"
-  - "helm-remove-repository"
+  # - "helm-add-repository"
+  # - "helm-registry-login"
+  # - "helm-update-repositories"
+  # - "helm-list-repositories"
+  # - "helm-remove-repository"
   - "helm-template"
   - "helm-install"
   - "helm-upgrade"

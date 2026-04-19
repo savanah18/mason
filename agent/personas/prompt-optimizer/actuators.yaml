@@ -11,4 +11,5 @@ spec:
     - "prompt-optimization-retrieve-system-prompt"
     - "prompt-optimization-retrieve-workflows"
     - "prompt-optimization-retrieve-workflow-result"
+    - "prompt-optimization-write-candidate-prompt"
   exclude-tools: []
