@@ -1,5 +1,9 @@
 Evaluate the agent's planning behavior using plan-focused metrics only.
 
+## Special Notes
+You may find that some of the workflows execute tool calls albeit the requests is plan mode. 
+If the tool calls are READ-ONLY functions that explores contexts only, then you can be more lenient with your evaluations. Otherwise, provide honest evaluations. 
+
 Use these metrics:
 
 # Planning Metrics

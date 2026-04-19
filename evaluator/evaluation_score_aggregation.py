@@ -331,6 +331,7 @@ def print_table(summaries: list[dict[str, Any]], run_mode: str = "e2e") -> None:
         "partial",
         "fail",
         "pass_rate",
+        "latest_reference",
     ]
 
     rows: list[list[str]] = []
@@ -367,6 +368,7 @@ def print_table(summaries: list[dict[str, Any]], run_mode: str = "e2e") -> None:
             str(verdicts.get("partial", 0)),
             str(verdicts.get("fail", 0)),
             "-" if item.get("pass_rate") is None else f"{item['pass_rate']:.2%}",
+            "-" if not isinstance(item.get("latest_reference"), str) or not item.get("latest_reference", "").strip() else item.get("latest_reference", "").strip(),
         ]
         rows.append(row)
 
