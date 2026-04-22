@@ -17,7 +17,7 @@ spec:
       env:
         CHAOS_CENTER_ENDPOINT: "http://172.25.152.192:32630"
         LITMUS_PROJECT_ID: "dadfe41f-505e-4023-bcbf-8e3b6033374c"
-        LITMUS_ACCESS_TOKEN: "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJleHAiOjQ5MjcxMzYyMTQsInJvbGUiOiJhZG1pbiIsInVpZCI6IjEzMDk0NTg0LTE3M2YtNDRhMy1hNDFjLTcyN2NkMWFiYzBmNCIsInVzZXJuYW1lIjoiYWRtaW4ifQ.crBvQ6Pv2ss6QTsnZ-Sih_QfMqlLq6eu10k4X2PhYyi_HdXwDge6mhhAEK-amtbMRGHLq3IEmUqfhULNZw-RGQ"
+        LITMUS_ACCESS_TOKEN: "${LITMUS_ACCESS_TOKEN}"
     # victoriametrics:
     #   command: "/app/actions/mcp/servers/victoria-metrics/mcp-victoriametrics"
     #   args: []
