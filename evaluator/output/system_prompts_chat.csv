@@ -1,0 +1,14 @@
+metadata_created_at,metadata_persona,redis_key,remarks_created_by,remarks_optimized_from,remarks_others
+system-prompts:chat:20260413T132114Z,chat,system-prompts:chat:20260413T132114Z,,,
+system-prompts:chat:20260413T140843Z,chat,system-prompts:chat:20260413T140843Z,,,
+system-prompts:chat:20260413T154001Z,chat,system-prompts:chat:20260413T154001Z,,,
+system-prompts:chat:20260413T155533Z,chat,system-prompts:chat:20260413T155533Z,,,
+system-prompts:chat:20260418T115203Z,chat,system-prompts:chat:20260418T115203Z,,,
+system-prompts:chat:20260418T115958Z,chat,system-prompts:chat:20260418T115958Z,,,
+system-prompts:chat:20260418T123254Z,chat,system-prompts:chat:20260418T123254Z,,,
+system-prompts:chat:20260419T130341Z,chat,system-prompts:chat:20260419T130341Z,prompt-optimizer + user,system-prompts:chat:20260413T155533Z,
+system-prompts:chat:20260420T120512Z,chat,system-prompts:chat:20260420T120512Z,prompt-optimizer + user,system-prompts:chat:20260413T155533Z,
+system-prompts:chat:20260420T120754Z,chat,system-prompts:chat:20260420T120754Z,prompt-optimizer + user,system-prompts:chat:20260413T155533Z,
+system-prompts:chat:20260422T135758Z,chat,system-prompts:chat:20260422T135758Z,prompt-optimizer + user,system-prompts:chat:20260420T120754Z,total content restructure from gemini
+system-prompts:chat:20260427T001031Z,chat,system-prompts:chat:20260427T001031Z,prompt-optimizer + user,system-prompts:chat:20260422T135758Z,
+system-prompts:chat:20260427T001031Z,chat,system-prompts:chat:latest,prompt-optimizer + user,system-prompts:chat:20260422T135758Z,

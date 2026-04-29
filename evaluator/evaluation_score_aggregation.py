@@ -173,7 +173,7 @@ def summarize_batch(
     persona: str,
     redis_client: redis.Redis,
 ) -> dict[str, Any]:
-    total_lines = 0
+    total_lines = -1 # to account for metadata line if present
     parsed_payloads = 0
     parse_errors = 0
 
