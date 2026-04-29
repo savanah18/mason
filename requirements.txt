@@ -19,6 +19,7 @@ requests==2.32.5
 
 # Configuration and serialization
 PyYAML==6.0.3
+ruamel.yaml==0.18.10
 kafka-python==2.3.0
 google-genai==0.8.0
 
