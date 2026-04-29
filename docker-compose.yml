@@ -31,6 +31,7 @@ x-common-agent-env: &common-agent-env
   KAFKA_BOOTSTRAP_SERVERS: kafka-server:9092
   KUBECONFIG: /run/secrets/kubernetes-config
   AGENT_MODE: ${AGENT_MODE:-dev} # eval, prod, dev
+  INFERENCE_SERVER_TYPE: ${INFERENCE_SERVER_TYPE:-tensorrt-llm}
 
 x-prometheus-env: &prometheus-env
   PROMETHEUS_URL: ${PROMETHEUS_URL}
@@ -46,7 +47,7 @@ services:
   # LLM 
   ## Development Server for TensorRT-LLM
   main-tensorrt-llm-server:
-    profiles: ["serving", "standard"]
+    profiles: ["serving", "serving-tensorrt-llm"]
     image: nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc5
     container_name: main-tensorrt-llm-server
     volumes:
@@ -61,6 +62,39 @@ services:
     - /bin/bash
     - -c 
     - /app/tensorrt_llm/src/scripts/serve.sh
+    ports:
+      - "8001:8000"
+    gpus: all
+    <<: *gpu-resources
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - triton-ai-network
+
+  main-vllm-server:
+    profiles: ["serving", "serving-vllm"]
+    image: nvcr.io/nvidia/vllm:26.03.post1-py3
+    container_name: main-vllm-server
+    volumes:
+    - source: *host_model_ckpt
+      target: /model
+      type: bind
+    environment:
+      - VLLM_USE_V1=0
+    command: >
+      vllm serve /model
+      --host 0.0.0.0
+      --port 8000
+      --dtype half
+      --enforce-eager
+      --gpu-memory-utilization 0.8
+      --max-model-len 32768
+      --language-model-only
+    #--reasoning-parser qwen3
     ports:
       - "8001:8000"
     gpus: all
@@ -139,7 +173,10 @@ services:
     - ./agent/templates:/app/templates:rw
     - ./agent/actions/:/app/actions:rw
     - ./agent/memory/:/app/memory:rw
-    - /root/workspace/lnd/aiops/vlm/Qwen/Qwen3-4B-Instruct-2507:/mnt/checkpoint:ro
+    - source: *host_model_ckpt
+      target: /mnt/checkpoint
+      type: bind
+    - /root/.config/gcloud:/root/.config/gcloud:rw # for GKE auth, if needed
     command: >
       python -u qwen-ops-agent.py 
     networks:
@@ -171,7 +208,9 @@ services:
     - ./agent/templates:/app/templates:rw
     - ./agent/actions/:/app/actions:rw
     - ./agent/memory/:/app/memory:rw
-    - /root/workspace/lnd/aiops/vlm/Qwen/Qwen3-4B-Instruct-2507:/mnt/checkpoint:ro
+    - source: *host_model_ckpt
+      target: /mnt/checkpoint
+      type: bind
     command: >
       python -u qwen-ops-agent.py 
     networks:
@@ -203,7 +242,10 @@ services:
     - ./agent/templates:/app/templates:rw
     - ./agent/actions/:/app/actions:rw
     - ./agent/memory/:/app/memory:rw
-    - /root/workspace/lnd/aiops/vlm/Qwen/Qwen3-4B-Instruct-2507:/mnt/checkpoint:ro
+    - source: *host_model_ckpt
+      target: /mnt/checkpoint
+      type: bind
+    - /root/.config/gcloud:/root/.config/gcloud:rw # for GKE auth, if needed
     command: >
       python -u qwen-chat-agent.py 
     ports:
@@ -231,7 +273,9 @@ services:
     - ./agent/templates:/app/templates:rw
     - ./agent/actions/:/app/actions:rw
     - ./agent/memory/:/app/memory:rw
-    - /root/workspace/lnd/aiops/vlm/Qwen/Qwen3-4B-Instruct-2507:/mnt/checkpoint:ro
+    - source: *host_model_ckpt
+      target: /mnt/checkpoint
+      type: bind
     command: >
       python -u qwen-ops-agent.py 
     networks:
