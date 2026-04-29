@@ -1,0 +1,27 @@
+File,Precondition_Type,Prompt_Intent,Chart,Version,Complexity,Status,Keep_Remove_Reason
+DEP-E-001.0,Clean slate (uninstall + delete ns),Initial deployment,nginx,22.6.10.,2,UNIQUE,Only clean-slate initial deployment test
+DEP-E-001.1,Pre-upgrade setup (prepare for update),Initial deployment,nginx,22.6.10.,3,KEEP,Baseline for duplicate group (5 files)
+DEP-E-001.2,Namespace preparation only,Initial deployment,nginx,22.6.10.,2,UNIQUE,Only namespace-only initial deployment
+DEP-E-001.3,Pre-upgrade setup (prepare for update),Initial deployment,nginx,22.6.10.,4,REMOVE,Duplicate of DEP-E-001.1
+DEP-E-001.4,Pre-upgrade setup (prepare for update),Initial deployment,nginx,22.6.10.,5,REMOVE,Duplicate of DEP-E-001.1
+DEP-E-001.6,Pre-upgrade setup (prepare for update),Initial deployment,nginx,22.6.10.,4,REMOVE,Duplicate of DEP-E-001.1
+DEP-E-002.0,Pre-upgrade setup (prepare for update),Upgrade/Update,redis,25.3.9.,4,KEEP,Baseline for duplicate group (2 files)
+DEP-E-002.1,Pre-upgrade setup (prepare for update),Upgrade/Update,redis,25.3.9.,6,REMOVE,Duplicate of DEP-E-002.0
+DEP-E-003.0,Pre-upgrade setup (prepare for update),Publish/Kafka operation,postgresql,18.5.14,4,UNIQUE,PostgreSQL Publish/Kafka without version suffix
+DEP-E-003.1,Pre-upgrade setup (prepare for update),Publish/Kafka operation,postgresql,18.5.14.,4,UNIQUE,PostgreSQL Publish/Kafka with version suffix
+DEP-E-005.0,Pre-upgrade setup (prepare for update),Upgrade/Update,memcached,8.3.7.,4,UNIQUE,Only memcached test at 8.3.7
+DEP-E-005.1,Pre-upgrade setup (prepare for update),Upgrade/Update,memcached,8.3.8.,6,UNIQUE,Memcached upgrade to 8.3.8
+DEP-E-006.0,Clean slate (uninstall + delete ns),Installation,nginx,22.6.10.,2,UNIQUE,Only clean-slate installation test
+DEP-E-006.1,Pre-upgrade setup (prepare for update),Initial deployment,nginx,22.6.10.,6,REMOVE,Duplicate of DEP-E-001.1 (different wording)
+DEP-E-006.2,Pre-upgrade setup (prepare for update),Upgrade/Update,nginx,22.6.10.,6,KEEP,Baseline for duplicate group (4 files)
+DEP-E-007.0,Namespace preparation only,Installation,nginx,22.6.10.,5,KEEP,Baseline for duplicate group (2 files)
+DEP-E-007.1,Pre-upgrade setup (prepare for update),Installation,nginx,22.6.10.,4,KEEP,Baseline for duplicate group (2 files)
+DEP-E-008.0,Pre-upgrade setup (prepare for update),General deployment,nginx,22.6.10.,5,UNIQUE,Only general deployment test
+DEP-E-008.1,Pre-upgrade setup (prepare for update),Upgrade/Update,nginx,22.6.10.,6,REMOVE,Duplicate of DEP-E-006.2
+DEP-E-009.0,Pre-upgrade setup (prepare for update),Installation,nginx,22.6.10.,4,REMOVE,Duplicate of DEP-E-007.1
+DEP-E-009.1,Pre-upgrade setup (prepare for update),Upgrade/Update,nginx,22.6.10.,6,REMOVE,Duplicate of DEP-E-006.2
+DEP-E-010.0,Namespace preparation only,Installation,nginx,22.6.10.,5,REMOVE,Duplicate of DEP-E-007.0
+DEP-E-010.1,Pre-upgrade setup (prepare for update),Upgrade/Update,nginx,22.6.10.,6,REMOVE,Duplicate of DEP-E-006.2
+DEP-E-010.2,Namespace preparation only,General deployment,nginx,22.6.10.,5,UNIQUE,Only namespace-only general deployment
+DEP-M-001.0,Pre-upgrade setup (prepare for update),Publish/Kafka operation,nginx,22.6.10.,4,UNIQUE,Only nginx Publish/Kafka test
+DEP-M-001.2,Namespace preparation only,Publish/Kafka operation,postgresql,18.5.14.,2,UNIQUE,PostgreSQL with namespace-only setup
