@@ -1,17 +1,17 @@
-id: DEP-E-009.0
+id: DEP-E-010.0
 chat-prompt: |
   Please process a deploy request for media-api in namespace media.
   Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10.
-  Context: post-install health is unstable because upstream dependency endpoints are flaky.
+  Context: the namespace exists, but a LimitRange will inject default resource requests that may alter the rollout shape.
   Scenarios:
   - Deployment target: release `media-api`, namespace `media`, chart `oci://registry-1.docker.io/bitnamicharts/nginx`, requested version `22.6.10`.
-  - Operating context: post-install health is unstable because upstream dependency endpoints are flaky.
-  - Edge case A: Ready pods may still fail requests because upstream endpoints are unstable.
-  - Edge case B: Average latency may look acceptable while p90 and success ratio degrade.
-  - Edge case C: Event chronology may show late readiness after initial success indicators.
-  - Constraint 1: Use metrics plus events to decide whether the deployment is actually healthy.
-  - Constraint 2: Treat success ratio and p90 as hard thresholds, not advisory metrics.
-  - Constraint 3: Include rollback or mitigation criteria if health degrades after install.
+  - Operating context: the namespace exists, but a LimitRange will inject default resource requests that may alter the rollout shape.
+  - Edge case A: A namespace LimitRange adds CPU and memory requests to otherwise unspecified pods.
+  - Edge case B: Those defaults could push the deployment into a tighter scheduling or quota boundary.
+  - Edge case C: The agent must inspect namespace policy before assuming the chart will install cleanly.
+  - Constraint 1: Account for namespace policy before choosing an install strategy.
+  - Constraint 2: Do not ignore automatically injected resource settings.
+  - Constraint 3: Verify the final running workload matches the intended release after admission.
   - Additional realism: include fallback logic for transient failures, explicit safety checks before rollout, and rollback criteria if health signals degrade.
   - Additional realism: assume unstable environment signals (event noise, delayed readiness, partial failures) and require a conservative, auditable deployment plan.
 
@@ -23,7 +23,24 @@ chat-prompt: |
 pre-condition-script: |
   kubectl create ns media --dry-run=client -o yaml | kubectl apply -f -
   helm uninstall media-api -n media || true
-  helm install media-api oci://registry-1.docker.io/bitnamicharts/nginx --version 22.6.10 -n media --create-namespace
+  kubectl delete limitrange media-default-limits -n media --ignore-not-found=true
+  kubectl apply -f - <<EOF
+  apiVersion: v1
+  kind: LimitRange
+  metadata:
+    name: media-default-limits
+    namespace: media
+  spec:
+    limits:
+    - type: Container
+      default:
+        cpu: 250m
+        memory: 256Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+  EOF
+        kubectl get limitrange media-default-limits -n media >/dev/null
 execution-script: |
   # Legacy chat transport path disabled for direct agent testing:
   # export CHAT_ENDPOINT=127.0.0.1:8002
@@ -37,7 +54,7 @@ execution-script: |
   #
   # curl -X POST "${CHAT_ENDPOINT}/chat/send"     -H "Content-Type: application/json"     -d "$json_payload"
   python3 tools/mock_plan_kafka_test_runner.py
-expected-execution-time: "600"
+expected-execution-time: "900"
 output-retrieval-script: |
   PERSONA=deployer
   python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}

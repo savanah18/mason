@@ -1,24 +1,24 @@
-id: DEP-E-006.1
+id: DEP-E-008.1
 chat-prompt: |
   Please process a deploy request for media-api in namespace media.
   Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10.
-  Context: an older release is already present and must be upgraded without a destructive reinstall.
+  Context: same release name already exists and conflict remediation is required.
   Scenarios:
   - Deployment target: release `media-api`, namespace `media`, chart `oci://registry-1.docker.io/bitnamicharts/nginx`, requested version `22.6.10`.
-  - Operating context: an older release is already present and must be upgraded without a destructive reinstall.
-  - Edge case A: A previous version of the same release is already installed.
-  - Edge case B: Release history exists and indicates an upgrade path rather than a fresh install.
-  - Edge case C: A prior manual change may have drifted values from chart defaults.
-  - Constraint 1: Check release history before deciding between install and upgrade.
-  - Constraint 2: Avoid unnecessary uninstall/reinstall if an upgrade is safer.
-  - Constraint 3: Verify the final release version after the action completes.
+  - Operating context: same release name already exists and conflict remediation is required.
+  - Edge case A: A release with the same name already exists in the namespace.
+  - Edge case B: An install attempt would likely fail unless the agent decides to upgrade or uninstall first.
+  - Edge case C: Historical revisions exist and should guide the safer remediation path.
+  - Constraint 1: Prefer history-based reasoning before choosing install, upgrade, or rollback.
+  - Constraint 2: Explain why the chosen conflict remediation is safest.
+  - Constraint 3: Check final workload state to ensure no partial deployment remains.
   - Additional realism: include fallback logic for transient failures, explicit safety checks before rollout, and rollback criteria if health signals degrade.
   - Additional realism: assume unstable environment signals (event noise, delayed readiness, partial failures) and require a conservative, auditable deployment plan.
 
-
-
   Execute the deployment safely using the tools available to you.
   Prioritize validation, safe rollout sequencing, and rollback readiness for media-api from oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10.
+
+
 
 pre-condition-script: |
   kubectl create ns media --dry-run=client -o yaml | kubectl apply -f -
@@ -39,7 +39,7 @@ execution-script: |
   #
   # curl -X POST "${CHAT_ENDPOINT}/chat/send"     -H "Content-Type: application/json"     -d "$json_payload"
   python3 tools/mock_plan_kafka_test_runner.py
-expected-execution-time: "600"
+expected-execution-time: "900"
 output-retrieval-script: |
   PERSONA=deployer
   python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}

@@ -1,0 +1,51 @@
+id: DEP-F-005.0
+chat-prompt: |
+  Please process a deploy request for media-api in namespace media-policy.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10.
+  Namespace defaults are constrained by policy objects, so validate admission risk and apply a conservative rollout strategy.
+
+pre-condition-script: |
+  kubectl create ns media-policy --dry-run=client -o yaml | kubectl apply -f -
+  helm uninstall media-api -n media-policy || true
+  kubectl apply -f - <<EOF
+  apiVersion: v1
+  kind: ResourceQuota
+  metadata:
+    name: media-policy-quota
+    namespace: media-policy
+  spec:
+    hard:
+      requests.cpu: "300m"
+      requests.memory: "512Mi"
+      limits.cpu: "600m"
+      limits.memory: "1Gi"
+  EOF
+  kubectl apply -f - <<EOF
+  apiVersion: v1
+  kind: LimitRange
+  metadata:
+    name: media-policy-limits
+    namespace: media-policy
+  spec:
+    limits:
+    - type: Container
+      default:
+        cpu: "250m"
+        memory: "256Mi"
+      defaultRequest:
+        cpu: "100m"
+        memory: "128Mi"
+  EOF
+execution-script: |
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "900"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  helm uninstall media-api -n media-policy || true
+  kubectl delete resourcequota media-policy-quota -n media-policy --ignore-not-found=true || true
+  kubectl delete limitrange media-policy-limits -n media-policy --ignore-not-found=true || true
+  kubectl delete ns media-policy --ignore-not-found=true

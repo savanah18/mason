@@ -1,0 +1,62 @@
+id: CHAT-AH-A-007.0
+chat-prompt: |
+  Ad-hoc request: investigate why config-consumer in namespace config-debug is not starting.
+  Validate whether configuration references are resolvable and identify the exact missing dependency.
+  Recommend the least disruptive fix.
+  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
+pre-condition-script: |
+  # Pre-condition: missing ConfigMap should trigger CreateContainerConfigError.
+  kubectl delete ns config-debug --ignore-not-found=true || true
+  kubectl wait --for=delete namespace/config-debug --timeout=120s || true
+  kubectl create ns config-debug
+  kubectl apply -f - <<EOF
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: config-consumer
+    namespace: config-debug
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: config-consumer
+    template:
+      metadata:
+        labels:
+          app: config-consumer
+      spec:
+        containers:
+        - name: app
+          image: nginx:1.27
+          envFrom:
+          - configMapRef:
+              name: app-runtime-config
+  EOF
+  sleep 3
+execution-script: |
+  export CHAT_ENDPOINT=127.0.0.1:8002
+  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+
+  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  echo CHAT_PROMPT: ${CHAT_PROMPT}
+  echo SESSION_ID: ${SESSION_ID}
+
+  json_payload=$(jq -n \
+  --arg message "$CHAT_PROMPT" \
+  --arg session_id "$SESSION_ID" \
+  --arg workflow_id "$WORKFLOW_ID" \
+  '{message: $message, session_id: $session_id, workflow_id: $workflow_id}')
+
+  curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+    -H "Content-Type: application/json" \
+    -d "$json_payload"
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=chat
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} $PERSONA
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  kubectl delete deploy config-consumer -n config-debug --ignore-not-found=true || true
+  kubectl delete configmap app-runtime-config -n config-debug --ignore-not-found=true || true
+  kubectl delete ns config-debug --ignore-not-found=true || true

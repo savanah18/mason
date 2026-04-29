@@ -1,0 +1,21 @@
+id: DEP-F-001.0
+chat-prompt: |
+  Please process a deployment request for media-web in namespace media-canary.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10.
+  The namespace is a canary lane, so prioritize safe rollout and explicit validation before completion.
+
+pre-condition-script: |
+  kubectl create ns media-canary --dry-run=client -o yaml | kubectl apply -f -
+  kubectl label namespace media-canary env=canary --overwrite
+  helm uninstall media-web -n media-canary || true
+execution-script: |
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "900"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  helm uninstall media-web -n media-canary || true
+  kubectl delete ns media-canary --ignore-not-found=true

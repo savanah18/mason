@@ -1,0 +1,21 @@
+File,Precondition Type,Complexity,Prompt Intent,Namespace,Focus Area,Persona,Status,Cluster,Action,Rationale,Line Reference
+CHAT-AH-001.0,Fresh namespace,1,Resource inventory,media-microservices,Read-only,chat,KEEP,A1,No action,Baseline workload inventory,L2-L4
+CHAT-AH-002.0,Fresh namespace,1,Metrics collection,media-microservices,Read-only,chat,REMOVE,A1,DELETE,Exact duplicate of 001/008,L2-L5
+CHAT-AH-003.0,Fresh namespace + release,2,Release verify + publish,finance,Read+Publish,chat,KEEP,-,No action,Unique: release + Kafka combo,L2-L5
+CHAT-AH-005.0,Fresh namespace + MCP,1,Readiness check + cross-validation,media-microservices,Read-only+MCP,chat,REVIEW,-,CONDITIONAL,MCP server dependency - strategic decision needed,L2-L4
+CHAT-AH-007.0,Fresh namespace,1,Release inspection,victoria-metrics,Read-only,chat,PARAMETRIZE,B1,MERGE with 011,Helm inspection only namespace variance,L2-L5
+CHAT-AH-008.0,Fresh namespace + workload,2,Resource snapshot,media-microservices,Read-only,chat,REMOVE,A1,DELETE,Triple redundancy with 001/002,L2-L6
+CHAT-AH-009.0,Fresh namespace + workload,2,Deployment verify + publish,media-microservices,Read+Publish,chat,KEEP,C1,No action,Distinct from 003: deployment vs release,L2-L6
+CHAT-AH-010.0,Fresh namespace + workload,2,Workload overview,finance,Read-only,chat,CONSOLIDATE,D1,MERGE with 013,Finance namespace overlap - parametrize,L2-L6
+CHAT-AH-011.0,Fresh namespace,1,Release inspection,infra,Read-only,chat,KEEP,B1,Parametrize 007,Canonical Helm inspection in infra NS,L2-L5
+CHAT-AH-012.0,Fresh namespace + workload,2,Right-size + publish,search,Write+Publish,chat,KEEP,-,No action,Unique: optimization + eventing combo,L2-L8
+CHAT-AH-013.0,Fresh namespace + pods,2,Resource definition inspection,finance,Read-only,chat,CONSOLIDATE,D1,MERGE with 010,Finance workload analysis - parametrizable variant,L2-L6
+CHAT-AH-014.0,Fresh namespace,1,Config + event inspection,infra,Read-only,chat,REVIEW,B1*,CONDITIONAL,Unique config+event combo - diagnostic value TBD,L2-L5
+CHAT-AH-015.0,Fresh namespace + pods,2,Health snapshot + logs,media-microservices,Read-only,chat,KEEP,-,No action,Unique: pod metrics + log diagnostics,L2-L7
+CHAT-AH-016.0,Fresh namespace + deployment,2,Replica scaling,search,Write,chat,KEEP,-,No action,Unique: single-dimension scaling pattern,L2-L5
+CHAT-AH-017.0,Quota incident,4,Quota recovery + right-size,incident-resolution,Write,chat,KEEP,E1,Absorb 020,Canonical quota incident - consolidation target,L5-L40
+CHAT-AH-018.0,Policy friction,5,Policy recovery + adjustment,incident-resolution,Write,chat,KEEP,F1,Absorb 021,Canonical policy incident - consolidation target,L5-L50
+CHAT-AH-019.0,Helm release conflict,3,Helm recovery,incident-resolution,Write,chat,KEEP,-,No action,Unique: Helm conflict resolution pattern,L5-L15
+CHAT-AH-020.0,Quota incident,4,Quota recovery + right-size,incident-resolution,Write,chat,REMOVE,E1,DELETE,Exact duplicate incident as 017 (minor resource variation),L5-L44
+CHAT-AH-021.0,Policy friction,5,Policy recovery + reduction,incident-resolution,Write,chat,REMOVE,F1,DELETE,Exact duplicate as 018 (identical setup + intent),L5-L50
+CHAT-AH-022.0,Multi-deployment + quota,6,Noise filtering + anomaly detection,incident-resolution,Write,chat,KEEP,-,No action,Unique: signal extraction under noise (max complexity),L5-L70

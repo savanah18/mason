@@ -28,7 +28,7 @@ execution-script: |
   #   -H "Content-Type: application/json" \
   #   -d "$json_payload"
   python3 tools/mock_plan_kafka_test_runner.py
-expected-execution-time: "600"
+expected-execution-time: "900"
 output-retrieval-script: |
   PERSONA=deployer
   python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}

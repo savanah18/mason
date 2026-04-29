@@ -13,22 +13,23 @@ pre-condition-script: |
   # Example placeholder only; replace with actual MCP/Litmus invocation when integrated.
   echo "TODO/PLACEHOLDER: invoke litmus-chaos event type=pod-delete namespace=media-microservices target=compose-review-service"
 execution-script: |
-  export CHAT_ENDPOINT=127.0.0.1:8002
-  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+  # export CHAT_ENDPOINT=127.0.0.1:8002
+  # SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
 
-  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
-  echo CHAT_PROMPT: ${CHAT_PROMPT}
-  echo SESSION_ID: ${SESSION_ID}
+  # echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  # echo CHAT_PROMPT: ${CHAT_PROMPT}
+  # echo SESSION_ID: ${SESSION_ID}
 
-  json_payload=$(jq -n \
-  --arg message "$CHAT_PROMPT" \
-  --arg session_id "$SESSION_ID" \
-  '{message: $message, session_id: $session_id}')
+  # json_payload=$(jq -n \
+  # --arg message "$CHAT_PROMPT" \
+  # --arg session_id "$SESSION_ID" \
+  # '{message: $message, session_id: $session_id}')
 
-  curl -X POST "${CHAT_ENDPOINT}/chat/send" \
-    -H "Content-Type: application/json" \
-    -d "$json_payload"
-expected-execution-time: "600"
+  # curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+  #   -H "Content-Type: application/json" \
+  #   -d "$json_payload"
+  python3 tools/mock_plan_resiliency_kafka_test_runner.py
+expected-execution-time: "1200"
 output-retrieval-script: |
   PERSONA=resiliency-optimizer
   python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}

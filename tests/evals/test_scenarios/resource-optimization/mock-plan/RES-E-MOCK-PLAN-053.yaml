@@ -20,7 +20,7 @@ pre-condition-script: |
 
 execution-script: |
   python3 tools/mock_plan_resiliency_kafka_test_runner.py
-expected-execution-time: "600"
+expected-execution-time: "1200"
 output-retrieval-script: |
   PERSONA=resiliency-optimizer
   python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}

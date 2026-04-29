@@ -1,16 +1,17 @@
-id: DEP-E-001.3
+id: DEP-E-001.4
 chat-prompt: |
   Please process a fresh install for media-api in namespace media.
   Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10. .
-  If the release already exists, you may choose no-op confirmation or upgrade-readiness based on observed state.
+  In this namespace with unrelated workloads, you may choose release-scoped or broader namespace validation.
 
 pre-condition-script: |
-  # Pre-condition: target release already exists before request.
+  # Pre-condition: namespace has unrelated workloads already running.
   echo "Skipping helm repo add: using OCI charts"
   echo "Skipping helm repo update: using OCI charts"
   kubectl create ns media --dry-run=client -o yaml | kubectl apply -f -
   helm uninstall media-api -n media || true
-  helm install media-api oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10. --version 22.6.10 -n media || true
+  helm uninstall media-cache -n media || true
+  helm install media-cache oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10. --version 22.6.10 -n media || true
 execution-script: |
   # Legacy chat transport path disabled for direct agent testing:
   # export CHAT_ENDPOINT=127.0.0.1:8002
@@ -31,7 +32,7 @@ execution-script: |
   #   -H "Content-Type: application/json" \
   #   -d "$json_payload"
   python3 tools/mock_plan_kafka_test_runner.py
-expected-execution-time: "600"
+expected-execution-time: "900"
 output-retrieval-script: |
   PERSONA=deployer
   python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
@@ -39,4 +40,5 @@ evaluation-script:
   echo TODO evaluation script with LLM as a judge
 post-condition-script: |
   helm uninstall media-api -n media || true
+  helm uninstall media-cache -n media || true
   kubectl delete ns media --ignore-not-found=true

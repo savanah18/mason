@@ -1,17 +1,17 @@
-id: DEP-E-008.1
+id: DEP-E-009.1
 chat-prompt: |
   Please process a deploy request for media-api in namespace media.
   Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10.
-  Context: same release name already exists and conflict remediation is required.
+  Context: manual drift exists in workload resources and the agent must avoid overwriting blindly.
   Scenarios:
   - Deployment target: release `media-api`, namespace `media`, chart `oci://registry-1.docker.io/bitnamicharts/nginx`, requested version `22.6.10`.
-  - Operating context: same release name already exists and conflict remediation is required.
-  - Edge case A: A release with the same name already exists in the namespace.
-  - Edge case B: An install attempt would likely fail unless the agent decides to upgrade or uninstall first.
-  - Edge case C: Historical revisions exist and should guide the safer remediation path.
-  - Constraint 1: Prefer history-based reasoning before choosing install, upgrade, or rollback.
-  - Constraint 2: Explain why the chosen conflict remediation is safest.
-  - Constraint 3: Check final workload state to ensure no partial deployment remains.
+  - Operating context: manual drift exists in workload resources and the agent must avoid overwriting blindly.
+  - Edge case A: An earlier operator patch changed container resources outside the chart defaults.
+  - Edge case B: The current rollout may be healthy but resource settings no longer match intent.
+  - Edge case C: Future upgrades could fail if the agent ignores drift and applies unsafe overrides.
+  - Constraint 1: Verify current release values or workload status before proposing a patch path.
+  - Constraint 2: Avoid destructive cleanup if a narrow upgrade or rollback is safer.
+  - Constraint 3: Document the reason for any resource changes in the plan.
   - Additional realism: include fallback logic for transient failures, explicit safety checks before rollout, and rollback criteria if health signals degrade.
   - Additional realism: assume unstable environment signals (event noise, delayed readiness, partial failures) and require a conservative, auditable deployment plan.
 
@@ -23,9 +23,9 @@ chat-prompt: |
 pre-condition-script: |
   kubectl create ns media --dry-run=client -o yaml | kubectl apply -f -
   helm uninstall media-api -n media || true
-  helm install media-api oci://registry-1.docker.io/bitnamicharts/nginx --version 22.6.9 -n media --create-namespace
-  helm status media-api -n media >/dev/null
-  helm history media-api -n media >/dev/null
+  helm install media-api oci://registry-1.docker.io/bitnamicharts/nginx --version 22.6.10 -n media --create-namespace
+  kubectl set resources deploy/media-api-nginx -n media --requests=cpu=50m,memory=64Mi --limits=cpu=200m,memory=256Mi
+  kubectl get deploy media-api-nginx -n media -o jsonpath='{.spec.template.spec.containers[0].resources.requests.cpu}' | grep -q '50m'
 execution-script: |
   # Legacy chat transport path disabled for direct agent testing:
   # export CHAT_ENDPOINT=127.0.0.1:8002
@@ -39,7 +39,7 @@ execution-script: |
   #
   # curl -X POST "${CHAT_ENDPOINT}/chat/send"     -H "Content-Type: application/json"     -d "$json_payload"
   python3 tools/mock_plan_kafka_test_runner.py
-expected-execution-time: "600"
+expected-execution-time: "900"
 output-retrieval-script: |
   PERSONA=deployer
   python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
