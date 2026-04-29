@@ -90,16 +90,32 @@ def find_matching_scenarios(regex_prefix: str):
     ]
 
 
+def load_completed_scenarios(checkpoint_file: Path) -> set:
+    """Load the set of already completed scenarios from checkpoint file."""
+    if not checkpoint_file.exists():
+        return set()
+    
+    with open(checkpoint_file, "r") as f:
+        return {line.strip() for line in f if line.strip()}
+
+
+def append_completed_scenario(checkpoint_file: Path, scenario: str):
+    """Append a completed scenario to the checkpoint file."""
+    with open(checkpoint_file, "a") as f:
+        f.write(scenario + "\n")
+
+
 def main(argv):
     if len(argv) < 2:
         print(
             "Usage: python test_runner.py <workflow.yaml> [--test-id <test_id>]\n"
-            "   or: python test_runner.py --regex-prefix <regex_prefix> [--test-id <test_id>]"
+            "   or: python test_runner.py --regex-prefix <regex_prefix> [--test-id <test_id>] [--include-completed]"
         )
         return 1
 
     args = argv[1:]
     test_id = None
+    include_completed = False
 
     if "--test-id" in args:
         idx = args.index("--test-id")
@@ -108,6 +124,10 @@ def main(argv):
             return 1
         test_id = args[idx + 1]
         del args[idx:idx + 2]
+
+    if "--include-completed" in args:
+        include_completed = True
+        args.remove("--include-completed")
 
     if not args:
         print("Missing workflow file or --regex-prefix")
@@ -119,12 +139,14 @@ def main(argv):
     date_str = datetime.now().strftime("%Y%m%d")
     workflow_ids = []
     
-    # Set up metadata file for continuous appending
+    # Set up metadata file and checkpoint file for continuous appending
     metadata_dir = Path(date_str) / test_id
     metadata_dir.mkdir(parents=True, exist_ok=True)
     metadata_file = metadata_dir / "metadata"
-    # Create empty metadata file
+    checkpoint_file = metadata_dir / "completed_scenarios"
+    # Create empty files if they don't exist
     metadata_file.touch()
+    checkpoint_file.touch()
 
     if args[0] == "--regex-prefix":
         if len(args) < 2:
@@ -137,22 +159,35 @@ def main(argv):
             print(f"No scenario files matched prefix regex: {regex_prefix}")
             return 1
 
+        # Load completed scenarios and filter them out (unless --include-completed)
+        completed = load_completed_scenarios(checkpoint_file) if not include_completed else set()
+        scenarios_to_run = [s for s in scenario_files if s not in completed]
+        
+        if completed:
+            print(f"Skipping {len(completed)} already completed scenarios")
+        print(f"Running {len(scenarios_to_run)} scenarios (total: {len(scenario_files)})")
+        if include_completed:
+            print("(--include-completed flag set, re-running all scenarios)")
+
         failures = 0
-        for scenario in scenario_files:
+        for scenario in scenarios_to_run:
             print(f"\n=== Running scenario: {scenario} ===")
             try:
                 run_workflow(scenario, test_id, date_str, workflow_ids, metadata_file)
+                # Mark scenario as completed in checkpoint
+                append_completed_scenario(checkpoint_file, scenario)
             except subprocess.CalledProcessError:
                 failures += 1
                 print(f"Scenario failed: {scenario}")
         
         print(
-            f"\nCompleted {len(scenario_files)} scenarios, "
+            f"\nCompleted {len(scenarios_to_run)} scenarios, "
             f"failures: {failures}"
         )
         print(f"Test ID: {test_id}")
         print(f"Results saved to: {metadata_dir}")
         print(f"Metadata file: {metadata_file}")
+        print(f"Checkpoint file: {checkpoint_file}")
         return 1 if failures else 0
 
     # Single workflow run
