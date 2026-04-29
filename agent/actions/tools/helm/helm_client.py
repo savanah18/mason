@@ -50,13 +50,37 @@ class HelmRevision:
 class HelmClient:
     """Async wrapper around helm CLI commands."""
 
-    def __init__(self, timeout: int = 300):
+    def __init__(self, timeout: int = 120):
         """Initialize HelmClient.
         
         Args:
-            timeout: Command execution timeout in seconds (default: 300s)
+            timeout: Command execution timeout in seconds (default: 120s)
         """
         self.timeout = timeout
+
+    # utils
+    def smart_compress(self, text, buffer=100):
+        """
+        Compresses a string by keeping the start and end, redacting the middle.
+        :param text: The string to compress
+        :param buffer: How many characters to keep on each end (default 100)
+        :return: Compressed string
+        """
+        if not text:
+            return ""
+            
+        # If the text is shorter than both buffers + a small margin for the message
+        # we return the original to avoid making the string longer with the redaction text.
+        if len(text) <= (buffer * 2):
+            return text
+
+        redaction_msg = f"\n...[redacted {len(text) - (buffer * 2)} chars to avoid context bloat]...\n"
+        
+        # Slicing in Python is safe; it won't throw IndexErrors even if buffer > len
+        start = text[:buffer]
+        end = text[-buffer:]
+        
+        return f"{start}{redaction_msg}{end}"
 
     async def _run_helm(
         self, 
@@ -89,7 +113,7 @@ class HelmClient:
 
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(input=stdin_bytes),
-                timeout=self.timeout
+                timeout=self.timeout + 60 # add buffer to timeout for command execution and output processing
             )
             
             output = stdout.decode('utf-8', errors='ignore').strip()
@@ -255,10 +279,10 @@ class HelmClient:
         if not result["success"]:
             # Template doesn't return JSON, return raw output
             if result["raw_output"]:
-                return result["raw_output"]
+                return self.smart_compress(result["raw_output"])
             raise RuntimeError(f"Failed to render template: {result['error']}")
         
-        return result["raw_output"]
+        return self.smart_compress(result["raw_output"])
 
     async def lint(
         self,
@@ -444,6 +468,7 @@ class HelmClient:
         
         if wait:
             args.append("--wait")
+            args.extend(["--timeout", f"{self.timeout}s"])
 
         if version:
             args.extend(["--version", version])
@@ -466,7 +491,6 @@ class HelmClient:
         namespace: str = "default",
         values: Optional[Dict[str, Any]] = None,
         wait: bool = True,
-        install: bool = True,
         version: Optional[str] = None
     ) -> Dict[str, Any]:
         """Upgrade Helm release.
@@ -477,7 +501,6 @@ class HelmClient:
             namespace: Target namespace
             values: Values overrides
             wait: Wait for resources to be ready
-            install: Install if release doesn't exist
             version: Optional chart version (for repo or OCI charts)
             Uses atomic mode so failed upgrades are rolled back automatically
             
@@ -486,14 +509,14 @@ class HelmClient:
         """
         args = ["upgrade", release_name, chart]
         args.extend(["-n", namespace])
-        args.append("--atomic")
-        
+        args.append("--install")
+        args.append("--rollback-on-failure")
+        args.append("--create-namespace")
+
         if wait:
             args.append("--wait")
+            args.extend(["--timeout", f"{self.timeout}s"])
         
-        if install:
-            args.append("--install")
-
         if version:
             args.extend(["--version", version])
         
@@ -567,6 +590,7 @@ class HelmClient:
         
         if wait:
             args.append("--wait")
+            args.extend(["--timeout", f"{self.timeout}s"])
         
         result = await self._run_helm(args, check_error=False)
         return self._build_command_result(
@@ -596,6 +620,7 @@ class HelmClient:
         
         if wait:
             args.append("--wait")
+            args.extend(["--timeout", f"{self.timeout}s"])
         
         result = await self._run_helm(args, check_error=False)
         return self._build_command_result(

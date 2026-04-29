@@ -56,7 +56,7 @@ from actions.tools.prompt_optimization.tools import (
 
 # Global backend instance
 backend = None
-
+inference_server_type = os.getenv("INFERENCE_SERVER_TYPE", "tensorrt-llm")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
     global backend
     print("🚀 Backend service starting...")
     backend = ChatAgentBackend(
-        llm_cfg_path = "./templates/llm/qwen.yaml",
+        llm_cfg_path = f"./templates/llm/qwen.{inference_server_type}.yaml",
         prompt_cfg_path = "./personas/chat/prompts.yaml",
         actuators = "./personas/chat/actuators.yaml",
         prune_intermediate_task_contexts = True

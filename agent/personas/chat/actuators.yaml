@@ -41,3 +41,5 @@ spec:
   - "kubernetes-apply-resource-update"
   - "prompt-optimization-retrieve-workflows"
   - "prompt-optimization-retrieve-workflow-result"
+  exclude-tools:
+  - kubernetes-nodes_stats_summary

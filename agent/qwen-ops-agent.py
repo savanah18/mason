@@ -26,7 +26,7 @@ from qwen_agent.utils.utils import extract_text_from_message
 from qwen_agent.utils.output_beautify import typewriter_print
 
 from templates.core.autonomous_agent import AutonomousAgent
-from templates.core.base import BaseAgent
+from templates.core.base import BaseAgent, parse_think_tags_from_responses
 from templates.core.sensor import Sensor, KafkaEventListener
 from templates.mixins.json import FromJsonMixin
 from templates.config.goals import GoalConfig, Goal
@@ -208,6 +208,7 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         return total
 
     async def reason(self, percepts=[], workflow_id=None):
+        # Wrap reason with try except and add handling with memory management and workflow execution recording for evaluations
         #****************** START OF WORKFLOW ******************
         print("Perfoming reasoning.... ")
         workflow_start_time = datetime.now()
@@ -260,6 +261,7 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         tmp = ""
         assistant_response  = ""
         structured_responses: List[Dict] = []
+        thoughts: List[str] = []
         task_total_token_cost = None
         task_prompt_token_cost = None
         task_gen_token_cost = None
@@ -277,12 +279,16 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
             gen_latency = datetime.now() - gen_time
 
             structured_responses = response
+            # Parse and extract think tags from assistant responses
+            structured_responses = parse_think_tags_from_responses(structured_responses)
+            thoughts = [r.get("thought") for r in structured_responses if r.get("role") == "assistant" and r.get("thought")]
             task_prompt_token_cost = self.compute_prompt_token_length(messages=messages, lang="en")
             print(f"[TokenUsage] Prompt tokens: {task_prompt_token_cost}")
             assistant_responses = [r for r in structured_responses if r['role']=='assistant' ]
             task_gen_token_cost = self.compute_total_tokens(assistant_responses)
             task_total_token_cost = task_prompt_token_cost + task_gen_token_cost
 
+            print(f"Assistant response: {assistant_response}")
             assistant_response = response[-1]['content'] # Most workflow agent answer are now in markdown format. 
             
         except Exception as e:
@@ -301,7 +307,6 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
             agent_type = PERSONA,
             #TODO agent mode args
         )
-        # TODO add token cost, latency, etc. in record
         workflow_exec.task_total_token_cost = task_total_token_cost
         workflow_exec.task_prompt_token_cost = task_prompt_token_cost
         workflow_exec.task_gen_token_cost = task_gen_token_cost
@@ -309,6 +314,7 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         # workflow_exec.model_generation_latency = gen_latency.seconds + gen_latency.microseconds/1e6
         workflow_exec.workflow_latency = workflow_latency.seconds + workflow_latency.microseconds/1e6
         workflow_exec.system_prompt_ref = self.system_prompt_status.get("latest_key", None) if self.system_prompt_status else None
+        workflow_exec.thoughts = thoughts
 
         # record 
         print("Recording workflow state")
@@ -336,10 +342,11 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         #****************** END OF HISTORIZATION ******************
 
 async def main():
+    inference_server_type = os.getenv("INFERENCE_SERVER_TYPE", "tensorrt-llm")
     agent = QwenOpsAgent(
         goal = f"./personas/{PERSONA}/goal.yaml",
         sensors = f"./personas/{PERSONA}/sensors.yaml",
-        llm_cfg = "./templates/llm/qwen.yaml",
+        llm_cfg = f"./templates/llm/qwen.{inference_server_type}.yaml",
         actuators = f"./personas/{PERSONA}/actuators.yaml",
         prune_intermediate_task_contexts = True
     )

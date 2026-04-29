@@ -3,6 +3,7 @@ import re
 from typing import Dict, List, Tuple
 from dataclasses import dataclass, field
 import json
+from datetime import datetime
 
 import redis
 
@@ -16,6 +17,7 @@ class WorkflowExecution():
     result: str = ""
     function_calls: List = field(default_factory=list)
     function_executions: List = field(default_factory=list)
+    thoughts: List = field(default_factory=list)
     all_tools_verified: bool = False
     workflow_latency: float = None
     model_generation_latency: float = None
@@ -60,7 +62,8 @@ class WorkflowExecution():
                         "agent_type": self.agent_type,
                         "session_id": str(self.session_id),
                         "workflow_id": str(self.workflow_id),
-                        "agent_mode": self.agent_mode
+                        "agent_mode": self.agent_mode,
+                        "created_on": datetime.now().isoformat(),
                     }),
                     "task": str(self.task),
                     "result": str(self.result),
@@ -78,6 +81,7 @@ class WorkflowExecution():
                         "task_gen_token_cost": self.task_gen_token_cost,
                         "ttft": self.ttft,
                     }),
+                    "thoughts": json.dumps(getattr(self, "thoughts", [])),
                     "optimization": json.dumps({
                         "prompt": "UNPROCESSED", # placeholder for future optimization logic
                         "reference": self.system_prompt_ref, # for potential future use in optimization

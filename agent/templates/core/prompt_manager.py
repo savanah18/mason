@@ -2,7 +2,7 @@ import os
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import redis
 import json5
@@ -57,7 +57,8 @@ class PromptUpdater:
 	def update_system_prompt_with_status(self, persona: str, system_prompt: Optional[str] = None) -> Dict[str, Any]:
 		"""Update latest/historized prompt and return structured status details."""
 		try:
-			current_prompt = system_prompt or self._load_system_prompt_from_goal_yaml(persona)
+
+			current_prompt, remarks, feedback = system_prompt or self._load_system_prompt_from_goal_yaml(persona)
 			current_prompt = (current_prompt or "").strip()
 			if not current_prompt:
 				print(f"[PromptUpdater] Empty prompt for persona={persona}; skipping update")
@@ -88,6 +89,8 @@ class PromptUpdater:
 						"persona": persona,
 						"created_at": historized_key,
 					}),
+					"remarks": json.dumps(remarks),
+					"feedback": json.dumps(feedback),
 				}
 				client.hset(latest_key,mapping=mapping)
 				client.hset(historized_key,mapping=mapping)
@@ -108,6 +111,8 @@ class PromptUpdater:
 						"persona": persona,
 						"created_at": historized_key,
 					}),
+					"remarks": json.dumps(remarks),
+					"feedback": json.dumps(feedback),
 				}
 				client.hset(latest_key,mapping=mapping)
 				client.hset(historized_key,mapping=mapping)
@@ -139,7 +144,7 @@ class PromptUpdater:
 				"latest_key": None,
 			}
 
-	def _load_system_prompt_from_goal_yaml(self, persona: str) -> str:
+	def _load_system_prompt_from_goal_yaml(self, persona: str) -> Tuple[str, dict, str]:
 		base_dir = Path(__file__).resolve().parents[2]
 		filename = "prompts.yaml" if persona == "chat" else "goal.yaml"
 		goal_path = base_dir / "personas" / persona / filename
@@ -147,7 +152,11 @@ class PromptUpdater:
 		with open(goal_path, "r", encoding="utf-8") as stream:
 			payload = yaml.safe_load(stream) or {}
 
-		return (payload.get("spec", {}) or {}).get("description", "") or payload.get("system", "")
+		prompt = (payload.get("spec", {}) or {}).get("description", "") or payload.get("system", "")
+		remarks = payload.get("spec", {}).get("remarks", {}) or payload.get("remarks", {})
+		feedback = payload.get("spec", {}).get("feedback", "") or payload.get("feedback", "")
+
+		return prompt, remarks, feedback
 
 	def _redis_client(self) -> redis.Redis:
 		host = os.getenv("REDIS_HOST", self.redis_host)

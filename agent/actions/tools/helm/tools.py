@@ -513,12 +513,6 @@ class HelmInstall(MemoryTraceableTool):
             'description': 'Map of custom values for the chart. This should be a JSON object with key-value pairs corresponding to the chart\'s values.yaml structure.',
             'required': False
         },
-        {
-            'name': 'create_namespace',
-            'type': 'string',
-            'description': 'Create namespace if it does not exist ("true"/"false", default: "true")',
-            'required': False
-        },
     ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
@@ -534,14 +528,11 @@ class HelmInstall(MemoryTraceableTool):
                 if args.get('values') and not isinstance(values, dict):
                     values = json5.loads(args['values'])
                 
-                create_ns = args.get('create_namespace', 'true').lower() == 'true'
-                
                 result = await client.install(
                     release_name=args['release_name'],
                     chart=args['chart'],
                     namespace=args.get('namespace', 'default'),
                     values=values,
-                    create_namespace=create_ns,
                     wait=True,
                     version=args.get('version')
                 )
@@ -599,12 +590,6 @@ class HelmUpgrade(MemoryTraceableTool):
             'description': 'Map of custom values for the chart. This should be a JSON object with key-value pairs corresponding to the chart\'s values.yaml structure.',
             'required': False
         },
-        {
-            'name': 'install',
-            'type': 'string',
-            'description': 'Install if release does not exist (true/false, default: true)',
-            'required': False
-        },
     ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
@@ -620,15 +605,12 @@ class HelmUpgrade(MemoryTraceableTool):
                 if args.get('values') and not isinstance(values, dict):
                     values = json5.loads(args['values'])
                 
-                install_flag = args.get('install', 'true').lower() == 'true'
-                
                 result = await client.upgrade(
                     release_name=args['release_name'],
                     chart=args['chart'],
                     namespace=args.get('namespace', 'default'),
                     values=values,
                     wait=True,
-                    install=install_flag,
                     version=args.get('version')
                 )
                 result['exec_id'] = exec_id

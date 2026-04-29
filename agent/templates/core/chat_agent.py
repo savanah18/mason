@@ -36,7 +36,7 @@ from templates.core.workflows import (
     sanitize_faux_tool_transcript
 )
 
-from .base import BaseAgent
+from .base import BaseAgent, parse_think_tags_from_responses
 from ..memory.management.agent_memory_mixin import MemoryManagementMixin
 
 
@@ -198,7 +198,10 @@ class ChatAgentBackend(BaseAgent, MemoryManagementMixin):
                 raise e
             gen_latency = datetime.now() - gen_time
 
-            structured_responses = response 
+            structured_responses = response
+            # Parse and extract think tags from assistant responses
+            structured_responses = parse_think_tags_from_responses(structured_responses)
+            print("Raw structured response: ", structured_responses)
 
             print("DEBUG length of structured responses: ", len(structured_responses))
             task_prompt_token_cost = self.compute_prompt_token_length(messages=messages, lang="en")

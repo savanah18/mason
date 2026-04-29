@@ -85,6 +85,50 @@ class BaseAgent:
     def compute_total_tokens(self, messages: List = []) -> int:
         tokenizer = AutoTokenizer.from_pretrained("/mnt/checkpoint")
         # print(f"Computing context length for  {messages}")
-        total_tokens = sum(len(tokenizer.encode(msg["content"])) for msg in messages)
+        total_tokens = 0
+        for msg in messages:
+            # Count tokens from both thought and content fields
+            if msg.get("thought"):
+                total_tokens += len(tokenizer.encode(msg["thought"]))
+            if msg.get("content"):
+                total_tokens += len(tokenizer.encode(msg["content"]))
         # print("Total tokens:\t ", total_tokens)
         return total_tokens
+
+
+def extract_think_tags(content: str) -> tuple[Optional[str], str]:
+    """Extract think tags from assistant response content.
+    
+    Returns:
+        (thought_text, cleaned_content) where thought_text is everything up to 
+        and including </think>, and cleaned_content is everything after </think>.
+        If no </think> found, returns (None, original_content).
+    """
+    if not content:
+        return None, content
+    
+    think_end = content.find("</think>")
+    if think_end == -1:
+        return None, content
+    
+    thought = content[:think_end + len("</think>")].strip()
+    final_answer = content[think_end + len("</think>"):].strip()
+    
+    return thought, final_answer
+
+
+def parse_think_tags_from_responses(responses: List[Dict]) -> List[Dict]:
+    """Parse think tags from all assistant responses and add thought field.
+    
+    Each response dict will gain a 'thought' field containing extracted reasoning,
+    and the 'content' field will contain only the final answer.
+    """
+    parsed = []
+    for resp in responses:
+        resp_copy = resp.copy()
+        if resp_copy.get("role") == "assistant" and resp_copy.get("content"):
+            thought, cleaned_content = extract_think_tags(resp_copy["content"])
+            resp_copy["thought"] = thought
+            resp_copy["content"] = cleaned_content
+        parsed.append(resp_copy)
+    return parsed
