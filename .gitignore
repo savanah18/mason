@@ -56,4 +56,5 @@ agent/memory/**
 
 # 
 tests/evals/*.json
+tests/evals/**/*.json
 evaluator/batch_results
