@@ -18,6 +18,7 @@ yaml_dumper.indent(mapping=2, sequence=4, offset=2)
 
 
 AGENT_BASE_DIR = Path("/root/workspace/lnd/aiops/apps/newbie-app/agent")
+CANDIDATE_KEY_PATTERN = "prompt-optimization:candidate-prompts:*"
 
 st.set_page_config(layout="wide")
 st.markdown(
@@ -56,6 +57,40 @@ def _parse_json(value):
 		return json.loads(text)
 	except Exception:
 		return value
+
+
+def _parse_candidate_key(candidate_key: str):
+	if not isinstance(candidate_key, str):
+		return "", ""
+	parts = candidate_key.split(":", 4)
+	if len(parts) != 5:
+		return "", ""
+	return parts[3], parts[4]
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _load_candidate_records():
+	r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+	records = []
+
+	for key in sorted(r.scan_iter(match=CANDIDATE_KEY_PATTERN)):
+		data = r.hgetall(key) or {}
+		persona, workflow_id = _parse_candidate_key(key)
+		records.append(
+			{
+				"key": key,
+				"persona": persona,
+				"workflow_id": workflow_id,
+				"created_at": data.get("created_at", ""),
+				"updated_at": data.get("updated_at", ""),
+				"created_by": data.get("created_by", ""),
+				"updated_by": data.get("updated_by", ""),
+				"original_prompt": data.get("original_prompt", ""),
+				"updated_prompt": data.get("updated_prompt", ""),
+			}
+		)
+
+	return records
 
 
 def _get_prompt_text(prompt_hash: dict):
@@ -266,6 +301,95 @@ def _accept_candidate_prompt(persona, editor_key, original_prompt_ref):
 
 
 st.title("Prompt Optimization Candidate")
+
+candidate_records = _load_candidate_records()
+if candidate_records:
+	candidate_frame = pd.DataFrame(candidate_records)
+	candidate_frame["created_at_sort"] = pd.to_datetime(candidate_frame["created_at"], errors="coerce", utc=True)
+
+	persona_options = ["All"] + sorted(
+		[p for p in candidate_frame["persona"].dropna().astype(str).unique().tolist() if p]
+	)
+	selected_persona_filter = st.sidebar.selectbox("Filter Persona", persona_options, index=0)
+	search_text = st.sidebar.text_input(
+		"Search Candidates",
+		value="",
+		placeholder="Search key, workflow_id, original/updated prompt...",
+	)
+
+	filtered_candidates = candidate_frame.copy()
+	if selected_persona_filter != "All":
+		filtered_candidates = filtered_candidates[
+			filtered_candidates["persona"].astype(str) == selected_persona_filter
+		]
+
+	if search_text.strip():
+		needle = search_text.strip().lower()
+
+		def _candidate_matches(row):
+			haystack = " ".join(
+				[
+					str(row.get("key", "")),
+					str(row.get("persona", "")),
+					str(row.get("workflow_id", "")),
+					str(row.get("original_prompt", "")),
+					str(row.get("updated_prompt", "")),
+				]
+			).lower()
+			return needle in haystack
+
+		filtered_candidates = filtered_candidates[
+			filtered_candidates.apply(_candidate_matches, axis=1)
+		]
+
+	filtered_candidates = filtered_candidates.sort_values(
+		by="created_at_sort", ascending=False, na_position="last"
+	)
+
+	st.subheader("Prompt Optimization Index")
+	st.caption(
+		f"Showing {len(filtered_candidates)} of {len(candidate_frame)} prompt optimization candidates"
+	)
+
+	table_columns = [
+		"key",
+		"persona",
+		"workflow_id",
+		"created_at",
+		"updated_at",
+		"created_by",
+		"updated_by",
+		"updated_prompt",
+	]
+	table_df = filtered_candidates[table_columns].copy()
+	table_df["updated_prompt"] = (
+		table_df["updated_prompt"]
+		.astype(str)
+		.str.replace(r"\s+", " ", regex=True)
+		.str.slice(0, 220)
+	)
+
+	st.dataframe(
+		table_df,
+		use_container_width=True,
+		hide_index=True,
+		height=360,
+	)
+
+	if not filtered_candidates.empty:
+		selected_candidate_key = st.selectbox(
+			"Quick Select Candidate",
+			filtered_candidates["key"].tolist(),
+			index=0,
+		)
+		quick_persona, quick_workflow_id = _parse_candidate_key(selected_candidate_key)
+		st.caption(
+			f"Selected candidate maps to persona={quick_persona or '-'} workflow_id={quick_workflow_id or '-'}"
+		)
+
+	st.divider()
+else:
+	st.info(f"No candidate prompt hashes found matching {CANDIDATE_KEY_PATTERN}")
 
 params = st.query_params
 persona_from_query = _normalize_query_value(params.get("persona"), "deployer")
