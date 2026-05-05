@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    .truncate { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
+    .filter-section-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+    .filter-toggle-button { padding: 6px 10px; border: 1px solid var(--vscode-button-border); border-radius: 3px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); cursor: pointer; font-size: 12px; }
+    .filter-toggle-button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+    .filter-section-body.collapsed { display: none; }
+    .header-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .registration-panel { border: 1px solid var(--vscode-panel-border); border-radius: 6px; padding: 12px; margin-bottom: 16px; background: rgba(255,255,255,0.02); }
+    .registration-panel.collapsed { display: none; }
+    .registration-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .registration-grid .full { grid-column: 1 / -1; }
+    .registration-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .registration-actions button { padding: 8px 12px; border: 1px solid var(--vscode-button-border); border-radius: 4px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; }
+    .registration-actions button:hover { background: var(--vscode-button-hoverBackground); }
+    .file-row { display: grid; grid-template-columns: 120px 1fr; gap: 8px; align-items: center; margin-top: 8px; }
+    .file-name { font-size: 11px; color: var(--vscode-descriptionForeground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--vscode-panel-border); }
+    .status-pill.registered { color: #4ec9b0; }
+    .status-pill.running { color: #89d185; }
+    .status-pill.terminated { color: #f48771; }
+    .status-pill.incomplete { color: #d7ba7d; }
+    .status-pill.error { color: #f48771; }
+    .lifecycle-notification { margin: 0 0 12px 0; padding: 10px; border-radius: 6px; border: 1px solid var(--vscode-panel-border); font-size: 12px; white-space: pre-wrap; }
+    .lifecycle-notification.ok { color: #4ec9b0; background-color: rgba(78, 201, 176, 0.08); border-color: #4ec9b0; }
+    .lifecycle-notification.warn { color: #d7ba7d; background-color: rgba(215, 186, 125, 0.08); border-color: #d7ba7d; }
+    .lifecycle-notification.error { color: #f48771; background-color: rgba(244, 135, 113, 0.08); border-color: #f48771; }
+    .validation-box { margin-top: 10px; padding: 10px; border-radius: 6px; border: 1px solid var(--vscode-panel-border); font-size: 12px; white-space: pre-wrap; }
+    .validation-box.ok { color: #4ec9b0; }
+    .validation-box.warn { color: #d7ba7d; }
+    .validation-box.error { color: #f48771; }
+    .detail-card-body pre, .detail-card-body code { white-space: pre-wrap; word-break: break-word; }
+    .detail-meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .empty-muted { color: var(--vscode-descriptionForeground); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="sidebar">
+      <div class="filter-section">
+        <div class="filter-section-header">
+          <h2>Filters</h2>
+          <button id="filterToggleButton" class="filter-toggle-button" type="button" onclick="toggleFilterSection()">Hide</button>
+        </div>
+        <div id="filterSectionBody" class="filter-section-body">
+          <div class="form-group">
+            <label>Persona</label>
+            <select id="personaFilter" onchange="applyFilters()">
+              <option value="All">All</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Search</label>
+            <input type="text" id="searchInput" placeholder="Search persona, status..." onkeyup="applyFilters()">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <div class="header">
+        <div class="header-top">
+          <h1>Agent Management</h1>
+          <button id="mainFilterToggleButton" class="filter-toggle-button" type="button" onclick="toggleFilterSection()">Hide Filters</button>
+        </div>
+        <div class="info-row">Showing <strong id="filteredCount">0</strong> of <strong id="totalCount">0</strong> agent personas</div>
+      </div>
+
+      <div id="lifecycleNotification" class="lifecycle-notification" style="display:none;"></div>
+
+      <div class="content-split">
+        <div class="list-pane">
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th onclick="sort('persona')" title="Click to sort">Persona</th>
+                  <th onclick="sort('status')" title="Click to sort">Status</th>
+                  <th onclick="sort('updated_at')" title="Click to sort">Updated At</th>
+                  <th onclick="sort('configured')" title="Click to sort">Configured Files</th>
+                </tr>
+              </thead>
+              <tbody id="tableBody">
+                <tr><td colspan="4" style="text-align: center; padding: 20px;">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div style="margin-top:12px;">
+            <button id="registerToggle" class="filter-toggle-button" type="button" onclick="toggleRegisterPanel()">Show Register</button>
+          </div>
+
+          <div id="registrationPanel" class="registration-panel collapsed" style="margin-top:8px;">
+            <h2 style="margin-top: 0;">Register Agent</h2>
+            <div class="registration-grid">
+              <div class="form-group full">
+                <label>Persona</label>
+                <input type="text" id="personaInput" placeholder="deployer" oninput="updateRegistrationPreview()">
+              </div>
+              <div class="form-group full">
+                <label>agent.yaml / agent.json</label>
+                <div class="file-row">
+                  <input type="file" id="agentFile" accept=".yaml,.yml,.json" onchange="handleFileInput('agent', this)">
+                  <span class="file-name" id="agentFileName">No file selected</span>
+                </div>
+              </div>
+              <div class="form-group full">
+                <label>goal.yaml / goal.json</label>
+                <div class="file-row">
+                  <input type="file" id="goalFile" accept=".yaml,.yml,.json" onchange="handleFileInput('goal', this)">
+                  <span class="file-name" id="goalFileName">No file selected</span>
+                </div>
+              </div>
+              <div class="form-group full">
+                <label>sensors.yaml / sensors.json</label>
+                <div class="file-row">
+                  <input type="file" id="sensorsFile" accept=".yaml,.yml,.json" onchange="handleFileInput('sensors', this)">
+                  <span class="file-name" id="sensorsFileName">No file selected</span>
+                </div>
+              </div>
+              <div class="form-group full">
+                <label>actuators.yaml / actuators.json</label>
+                <div class="file-row">
+                  <input type="file" id="actuatorsFile" accept=".yaml,.yml,.json" onchange="handleFileInput('actuators', this)">
+                  <span class="file-name" id="actuatorsFileName">No file selected</span>
+                </div>
+              </div>
+            </div>
+            <div class="registration-actions">
+              <button type="button" onclick="validateAndRegister()">Validate & Register</button>
+              <button type="button" onclick="clearRegistrationForm()">Clear</button>
+            </div>
+            <div id="registrationValidation" class="validation-box warn" style="display:none;"></div>
+          </div>
+        </div>
+
+        <div class="details-pane">
+          <div class="details-header">
+            <h2>Agent Details</h2>
+            <div class="details-subtitle" id="detailsSubtitle">Select an agent persona to inspect the full configuration.</div>
+          </div>
+          <div class="details-content">
+            <div id="detailsContent" class="details-empty">No agent selected.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const vscode = acquireVsCodeApi();
+    let allRecords = [];
+    let filteredRecords = [];
+    let selectedPersona = '';
+    let sortColumn = 'persona';
+    let sortAsc = true;
+    const uploadedFiles = { agent: null, goal: null, sensors: null, actuators: null };
+    const webviewState = vscode.getState() || {};
+
+    if (webviewState.filtersCollapsed) {
+      requestAnimationFrame(() => applyFilterSectionState(true));
+    }
+
+    window.addEventListener('message', event => {
+      const message = event.data;
+      if (message.type === 'setData') {
+        allRecords = message.records || [];
+        filteredRecords = [...allRecords];
+        updatePersonaDropdown();
+        renderTable();
+        if (filteredRecords.length > 0) {
+          selectRecord(filteredRecords[0].persona);
+        } else {
+          renderDetails(null);
+        }
+      } else if (message.type === 'registrationValidation') {
+        showValidation(message);
+      } else if (message.type === 'actionResult') {
+        showActionResult(message);
+      }
+    });
+
+    function updatePersonaDropdown() {
+      const personas = ['All', ...new Set(allRecords.map(r => r.persona))].filter(Boolean);
+      const select = document.getElementById('personaFilter');
+      const currentValue = select.value;
+      select.innerHTML = personas.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+      select.value = currentValue || 'All';
+    }
+
+    function applyFilterSectionState(collapsed) {
+      const container = document.querySelector('.container');
+      const sidebarButton = document.getElementById('filterToggleButton');
+      const mainButton = document.getElementById('mainFilterToggleButton');
+      if (!container) return;
+      container.classList.toggle('sidebar-collapsed', collapsed);
+      if (sidebarButton) {
+        sidebarButton.textContent = collapsed ? 'Show' : 'Hide';
+      }
+      if (mainButton) {
+        mainButton.textContent = collapsed ? 'Show Filters' : 'Hide Filters';
+      }
+      vscode.setState({ ...webviewState, filtersCollapsed: collapsed });
+    }
+
+    function toggleFilterSection() {
+      const container = document.querySelector('.container');
+      if (!container) return;
+      applyFilterSectionState(!container.classList.contains('sidebar-collapsed'));
+    }
+
+    function applyFilters() {
+      const persona = document.getElementById('personaFilter').value;
+      const search = document.getElementById('searchInput').value.toLowerCase();
+      filteredRecords = allRecords.filter(r => {
+        if (persona !== 'All' && r.persona !== persona) return false;
+        if (search) {
+          const haystack = `${r.persona} ${r.status} ${r.updated_at}`.toLowerCase();
+          if (!haystack.includes(search)) return false;
+        }
+        return true;
+      });
+      sortAndRender();
+      if (filteredRecords.length > 0) {
+        const keepSelected = filteredRecords.find(r => r.persona === selectedPersona);
+        selectRecord((keepSelected || filteredRecords[0]).persona);
+      } else {
+        selectedPersona = '';
+        renderDetails(null);
+      }
+    }
+
+    function sort(column) {
+      if (sortColumn === column) {
+        sortAsc = !sortAsc;
+      } else {
+        sortColumn = column;
+        sortAsc = true;
+      }
+      sortAndRender();
+    }
+
+    function sortAndRender() {
+      filteredRecords.sort((a, b) => {
+        const aVal = String(a[sortColumn] || '');
+        const bVal = String(b[sortColumn] || '');
+        const cmp = aVal.localeCompare(bVal);
+        return sortAsc ? cmp : -cmp;
+      });
+      renderTable();
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById('tableBody');
+      document.getElementById('filteredCount').textContent = filteredRecords.length;
+      document.getElementById('totalCount').textContent = allRecords.length;
+
+      if (filteredRecords.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 20px;">No records found</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = filteredRecords.map(r => `
+        <tr class="${r.persona === selectedPersona ? 'selected-row' : ''}" onclick="selectRecord('${escapeJs(r.persona)}')">
+          <td><span class="truncate">${escapeHtml(r.persona)}</span></td>
+          <td><span class="status-pill ${escapeHtml(r.status)}">${escapeHtml(r.status || '-')}</span></td>
+          <td>${escapeHtml(r.updated_at || '-')}</td>
+          <td>${renderConfiguredFiles(r.configured_files || {})}</td>
+        </tr>
+      `).join('');
+    }
+
+    function renderConfiguredFiles(configuredFiles) {
+      const keys = Object.keys(configuredFiles || {});
+      const ok = keys.filter(key => configuredFiles[key]).length;
+      return `${ok}/${keys.length || 4}`;
+    }
+
+    function selectRecord(persona) {
+      selectedPersona = persona;
+      renderTable();
+      const record = filteredRecords.find(r => r.persona === persona) || allRecords.find(r => r.persona === persona);
+      renderDetails(record || null);
+    }
+
+    function renderDetails(record) {
+      const detailsContent = document.getElementById('detailsContent');
+      const subtitle = document.getElementById('detailsSubtitle');
+
+      if (!record) {
+        subtitle.textContent = 'Select an agent persona to inspect the full configuration.';
+        detailsContent.className = 'details-empty';
+        detailsContent.innerHTML = 'No agent selected.';
+        return;
+      }
+
+      subtitle.textContent = `${record.persona || '-'} / ${record.status || '-'}`;
+      detailsContent.className = 'details-grid';
+      detailsContent.innerHTML = `
+        <div class="detail-card">
+          <h3 onclick="toggleCard(this)"><span class="arrow">▼</span>General Details</h3>
+          <div class="detail-card-content">
+            <div class="detail-meta-grid">
+              <div class="detail-item"><span class="detail-label">Persona</span><div class="detail-value">${escapeHtml(record.persona || '-')}</div></div>
+              <div class="detail-item"><span class="detail-label">Status</span><div class="detail-value">${escapeHtml(record.status || '-')}</div></div>
+              <div class="detail-item"><span class="detail-label">Status Updated At</span><div class="detail-value">${escapeHtml(record.status_updated_at || '-')}</div></div>
+              <div class="detail-item"><span class="detail-label">Updated At</span><div class="detail-value">${escapeHtml(record.updated_at || '-')}</div></div>
+              <div class="detail-item"><span class="detail-label">Configured Files</span><div class="detail-value">${renderConfiguredFiles(record.configured_files || {})}</div></div>
+            </div>
+            <div class="detail-item"><span class="detail-label">Agent Spec</span><div class="json-block">${escapeHtml(JSON.stringify(record.general_details || {}, null, 2))}</div></div>
+          </div>
+        </div>
+        <div class="detail-card">
+          <h3 onclick="toggleCard(this)"><span class="arrow">▼</span>Goals</h3>
+          <div class="detail-card-content">
+            <div class="json-block">${escapeHtml(JSON.stringify(record.goals || {}, null, 2))}</div>
+          </div>
+        </div>
+        <div class="detail-card">
+          <h3 onclick="toggleCard(this)"><span class="arrow">▼</span>Sensors</h3>
+          <div class="detail-card-content">
+            <div class="json-block">${escapeHtml(JSON.stringify(record.sensors || {}, null, 2))}</div>
+          </div>
+        </div>
+        <div class="detail-card">
+          <h3 onclick="toggleCard(this)"><span class="arrow">▼</span>Actuators</h3>
+          <div class="detail-card-content">
+            <div class="json-block">${escapeHtml(JSON.stringify(record.actuators || {}, null, 2))}</div>
+          </div>
+        </div>
+        <div class="detail-card">
+          <h3>Lifecycle Actions</h3>
+          <div class="detail-card-content">
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="button-save" type="button" onclick="instantiateAgent('${escapeJs(record.persona)}')">Instantiate</button>
+              <button class="button-reset" type="button" onclick="terminateAgent('${escapeJs(record.persona)}')">Terminate</button>
+              <button class="button-reload" type="button" onclick="restartAgent('${escapeJs(record.persona)}')">Restart</button>
+              <button class="button-reset" type="button" onclick="deleteAgent('${escapeJs(record.persona)}')">Delete Agent</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function toggleCard(header) {
+      const content = header.nextElementSibling;
+      const arrow = header.querySelector('.arrow');
+      content.classList.toggle('collapsed');
+      arrow.classList.toggle('collapsed');
+    }
+
+    function handleFileInput(key, input) {
+      const file = input.files && input.files[0] ? input.files[0] : null;
+      const label = document.getElementById(`${key}FileName`);
+      uploadedFiles[key] = null;
+      if (!file) {
+        if (label) label.textContent = 'No file selected';
+        return;
+      }
+
+      if (!/\.(ya?ml|json)$/i.test(file.name)) {
+        showValidation({ valid: false, warnings: [`${file.name} is not a yaml/json file.`] }, false);
+        input.value = '';
+        if (label) label.textContent = 'No file selected';
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        uploadedFiles[key] = {
+          name: file.name,
+          content: String(reader.result || '')
+        };
+        if (label) label.textContent = file.name;
+        updateRegistrationPreview();
+      };
+      reader.onerror = () => {
+        showValidation({ valid: false, warnings: [`Failed reading ${file.name}.`] }, false);
+      };
+      reader.readAsText(file);
+    }
+
+    function updateRegistrationPreview() {
+      const persona = document.getElementById('personaInput').value.trim();
+      const missing = ['agent', 'goal', 'sensors', 'actuators'].filter(key => !uploadedFiles[key]);
+      const warnings = [];
+      if (!persona) warnings.push('Persona is required.');
+      if (missing.length > 0) warnings.push(`Missing files: ${missing.join(', ')}`);
+      showValidation({ valid: warnings.length === 0, warnings }, warnings.length === 0);
+    }
+
+    function validateAndRegister() {
+      const persona = document.getElementById('personaInput').value.trim();
+      const files = {
+        agent: uploadedFiles.agent,
+        goal: uploadedFiles.goal,
+        sensors: uploadedFiles.sensors,
+        actuators: uploadedFiles.actuators,
+      };
+      vscode.postMessage({
+        command: 'registerAgent',
+        persona,
+        files,
+      });
+    }
+
+    function instantiateAgent(persona) {
+      vscode.postMessage({ command: 'instantiateAgent', persona });
+    }
+
+    function terminateAgent(persona) {
+      vscode.postMessage({ command: 'terminateAgent', persona });
+    }
+
+    function restartAgent(persona) {
+      vscode.postMessage({ command: 'restartAgent', persona });
+    }
+
+    function deleteAgent(persona) {
+      const ok = confirm(`Delete all registry records for persona '${persona}'?`);
+      if (!ok) return;
+      vscode.postMessage({ command: 'deleteAgent', persona });
+    }
+
+    function toggleRegisterPanel() {
+      const panel = document.getElementById('registrationPanel');
+      const btn = document.getElementById('registerToggle');
+      if (!panel || !btn) return;
+      const collapsed = panel.classList.toggle('collapsed');
+      btn.textContent = collapsed ? 'Show Register' : 'Hide Register';
+    }
+
+    function clearRegistrationForm() {
+      document.getElementById('personaInput').value = '';
+      ['agent', 'goal', 'sensors', 'actuators'].forEach(key => {
+        uploadedFiles[key] = null;
+        const input = document.getElementById(`${key}File`);
+        const label = document.getElementById(`${key}FileName`);
+        if (input) input.value = '';
+        if (label) label.textContent = 'No file selected';
+      });
+      showValidation({ valid: false, warnings: ['Registration form cleared.'] }, false);
+    }
+
+    function showValidation(payload, isSuccess) {
+      const box = document.getElementById('registrationValidation');
+      if (!box) return;
+      const warnings = payload && payload.warnings ? payload.warnings : [];
+      if (warnings.length === 0 && !isSuccess) {
+        box.style.display = 'none';
+        box.textContent = '';
+        return;
+      }
+      box.style.display = 'block';
+      box.className = `validation-box ${isSuccess ? 'ok' : 'warn'}`;
+      const prefix = payload && payload.action ? `${payload.action}: ` : '';
+      box.textContent = `${prefix}${warnings.join('\n')}`;
+    }
+
+    function showActionResult(message) {
+      const notifBox = document.getElementById('lifecycleNotification');
+      if (!notifBox) return;
+      
+      const actionText = message.action ? `${message.action}: ` : '';
+      const messageText = message.message || '';
+      notifBox.textContent = `${actionText}${messageText}`;
+      notifBox.style.display = 'block';
+      notifBox.className = `lifecycle-notification ${message.success ? 'ok' : 'warn'}`;
+    }
+
+    function escapeHtml(text) {
+      const map = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'};
+      return String(text).replace(/[&<>"']/g, m => map[m]);
+    }
+
+    function escapeJs(text) {
+      return String(text).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    }
+
+    vscode.postMessage({ command: 'init' });
+  </script>
+</body>
+</html>

@@ -1,9 +1,15 @@
 from pydantic import BaseModel 
 from typing import Optional, List
+from datetime import datetime
 
 class ChatMessage(BaseModel):
     role: str  # "user" or "assistant"
     content: str
+    id: 'str'  # unique identifier for the message
+    created_at: datetime
+    persisted_at: Optional[datetime] = None
+    discrete_memory_extracted: Optional[str] = 'f'  # any structured memory extracted from this message
+
 
 class ChatRequest(BaseModel):
     message: str
@@ -23,4 +29,10 @@ class ChatResponse(BaseModel):
 class ChatHistory(BaseModel):
     session_id: str
     messages: List[ChatMessage]
-    created_at: str
+    # created_at: str
+
+
+class SessionSummary(BaseModel):
+    session_id: str
+    timestamp: float
+    first_user_message: Optional[str] = None

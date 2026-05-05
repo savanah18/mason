@@ -10,7 +10,7 @@ SMTP_PORT = 465
 SENDER_EMAIL = "aglubagerry@gmail.com"
 APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")  # Use an app password for Gmail
 
-def send_notification(recipient_email, subject, body):
+def send_notification(recipient_email, subject, body, sender_email=SENDER_EMAIL, app_password=APP_PASSWORD):
     # Create the email container
     msg = MIMEMultipart()
     msg['From'] = SENDER_EMAIL
@@ -24,7 +24,7 @@ def send_notification(recipient_email, subject, body):
     try:
         # Connect and send
         with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
-            server.login(SENDER_EMAIL, APP_PASSWORD)
+            server.login(sender_email, app_password)
             server.send_message(msg)
         print(f"✅ Notification sent to {recipient_email}")
     except Exception as e:

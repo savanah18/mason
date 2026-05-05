@@ -5,8 +5,10 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 import yaml
+import redis
 from fastapi import FastAPI
 
 # Model
@@ -43,8 +45,9 @@ from ..memory.management.agent_memory_mixin import MemoryManagementMixin
 AGENT_MODE = os.getenv("AGENT_MODE","prod")
 
 class ChatAgentBackend(BaseAgent, MemoryManagementMixin):
-    """Manages agent sessions and chat state."""
 
+
+    """Manages agent sessions and chat state."""
     def __init__(self, *args, **kwargs):
         self.sessions: Dict[str, Dict] = {}
         self.agent = None
@@ -67,10 +70,21 @@ class ChatAgentBackend(BaseAgent, MemoryManagementMixin):
         
         # LLM Configuration
         llm_cfg =  self._initialize_llm_cfg(llm_cfg_path)
-        # Prompts
-        # TODO Integrate system prompt to memory server
-        prompts = self._initialized_prompts(prompt_cfg_path)
-        self.system_prompt = prompts.get("system")
+        # Prompts: prefer Redis latest; only read file when Redis missing
+        prompt_updater = PromptUpdater()
+        try:
+            redis_prompt, remarks, feedback = prompt_updater.get_latest_system_prompt("chat")
+        except Exception:
+            redis_prompt = None
+
+        if redis_prompt:
+            self.system_prompt = redis_prompt
+            self.system_prompt_status = {"success": True, "updated": False, "reason": "from-redis", "latest_key": None}
+        else:
+            # Fallback: read from file and historize in Redis
+            prompts = self._initialized_prompts(prompt_cfg_path)
+            self.system_prompt = prompts.get("system")
+            self.system_prompt_status = prompt_updater.update_system_prompt_with_status("chat")
 
         # Tools
         mcp_config = self._initialize_mcp_cfg(actuators)
@@ -79,9 +93,7 @@ class ChatAgentBackend(BaseAgent, MemoryManagementMixin):
         function_tools = mcp_config['builtin-functions']
         self.tools_count = len(mcp_tools + function_tools)
 
-        prompt_updater = PromptUpdater()
-        self.system_prompt_status = prompt_updater.update_system_prompt_with_status("chat")
-        print(f"[PromptUpdater] update_system_prompt(persona=chat) -> {self.system_prompt_status}")
+        print(f"[PromptUpdater] system prompt status -> {self.system_prompt_status}")
 
         # Memory 
         self.memory_client = self._initialize_memory_manager()
@@ -97,12 +109,20 @@ class ChatAgentBackend(BaseAgent, MemoryManagementMixin):
         print(f"Initializing agent with system prompt {self.system_prompt}")
     
     def _initialized_prompts(self, config_path="./config/prompts"):
+        # Prefer latest prompt from Redis (historized by PromptUpdater). Fallback to file.
+        try:
+            updater = PromptUpdater()
+            prompt, remarks, feedback = updater.get_latest_system_prompt("chat")
+            if prompt:
+                return {"system": prompt}
+        except Exception:
+            pass
+
         try:
             with open(config_path, "r") as f: 
                 prompts = yaml.safe_load(f)
         except Exception as e:
             prompts = {"system": ""}
-        #print(f"✓ Qwen Agent initialized with the following prompts.\n {prompts}")
         return prompts
     
 
@@ -150,7 +170,93 @@ class ChatAgentBackend(BaseAgent, MemoryManagementMixin):
                     extract_text_from_message(msg, add_upload_info=True)
                 )
         return total
-    
+
+    async def get_latest_sessions(self, offset: int = 10) -> List[Dict[str, object]]:
+        """Load latest working-memory session summaries by scanning Redis metadata timestamps."""
+        if not self.memory_client or offset <= 0:
+            return []
+
+
+        namespace = getattr(getattr(self, "memory_client", None), "config", None)
+        namespace = getattr(namespace, "default_namespace", "chat")
+        user_id = self.__class__.__name__
+        pattern = f"working_memory:{namespace}:{user_id}:*"
+
+        try:
+            redis_client = redis.Redis(host="redis", port=6379, decode_responses=True)
+            keys = list(redis_client.scan_iter(match=pattern))
+        except Exception as e:
+            print(f"[W] Failed to read working memory keys from Redis: {e}")
+            return []
+
+        # Python-side scan and sort for ReJSON keys only
+        session_list = []
+        for key in keys:
+            try:
+                key_type = redis_client.type(key)
+                if key_type == b'ReJSON-RL' or key_type == 'ReJSON-RL':
+                    json_obj = redis_client.json().get(key, '.')
+                    last_updated = json_obj.get("updated_at") if isinstance(json_obj, dict) else 0.0
+                    session_list.append({
+                        "session_id": key.split(":")[-1],
+                        "timestamp": float(last_updated) if last_updated else 0.0,
+                    })
+            except Exception as e:
+                print(f"[W] Failed to fetch session for key {key}: {e}")
+                continue
+
+        latest_ids = [
+            item["session_id"]
+            for item in sorted(session_list, key=lambda x: x["timestamp"], reverse=True)[:offset]
+        ]
+
+        latest_sessions: List[Dict[str, object]] = []
+        for session_id in latest_ids:
+            first_user_message = None
+            try:
+                _, session = await self.get_session(session_id)
+                if session and getattr(session, "messages", None):
+                    for message in session.messages:
+                        message_dict = message.dict() if hasattr(message, "dict") else message
+                        if message_dict.get("role") == "user":
+                            first_user_message = compact_assistant_chunk_text(
+                                message_dict.get("content", ""),
+                                120,
+                            )
+                            break
+            except Exception as e:
+                print(f"[W] Failed to load session contents for {session_id}: {e}")
+
+            latest_sessions.append(
+                {
+                    "session_id": session_id,
+                    "timestamp": next(
+                        (item["timestamp"] for item in session_list if item["session_id"] == session_id),
+                        0.0,
+                    ),
+                    "first_user_message": first_user_message,
+                }
+            )
+
+        return latest_sessions
+
+    def get_session_messages_as_dicts(self, session):
+        """Return all messages as dicts for serialization/response."""
+        if not session or not getattr(session, "messages", None):
+            return []
+        result = []
+        for msg in session.messages:
+            if hasattr(msg, 'dict'):
+                result.append(msg.dict())
+            elif isinstance(msg, dict):
+                result.append(msg)
+            else:
+                try:
+                    result.append(dict(msg))
+                except Exception:
+                    pass
+        return result
+
     async def send_message(self, session_id: str, user_message: str, workflow_id: Optional[str] = None) -> tuple[str, int, int]:
         """Send a message and get response with execution verification. Returns (response_text, context_length, input_length)."""
         if not self.agent:

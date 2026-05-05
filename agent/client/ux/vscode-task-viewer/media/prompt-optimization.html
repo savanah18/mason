@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    .truncate { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
+    .filter-section-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+    .filter-toggle-button { padding: 6px 10px; border: 1px solid var(--vscode-button-border); border-radius: 3px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); cursor: pointer; font-size: 12px; }
+    .filter-toggle-button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+    .filter-section-body.collapsed { display: none; }
+    .header-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .quick-select { width: 100%; margin-bottom: 16px; }
+    .prompt-section { margin-bottom: 20px; border: 1px solid var(--vscode-textBlockQuote-border); border-radius: 4px; padding: 12px; background: var(--vscode-textBlockQuote-background); }
+    .prompt-editor { width: 100%; min-height: 180px; padding: 10px; font-family: monospace; font-size: 12px; border: 1px solid var(--vscode-editorWidget-border); border-radius: 3px; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); resize: vertical; }
+    .button-group { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .button-group button { flex: 1; min-width: 140px; padding: 8px 12px; border: 1px solid var(--vscode-button-border); border-radius: 3px; cursor: pointer; font-size: 12px; }
+    .button-save { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+    .button-save:hover { background: var(--vscode-button-hoverBackground); }
+    .button-reset { background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); border: 1px solid var(--vscode-editorWidget-border); }
+    .button-reset:hover { background: var(--vscode-editorWidget-background); }
+    .button-reload { background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); border: 1px solid var(--vscode-editorWidget-border); }
+    .prompt-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .prompt-pane { border: 1px solid var(--vscode-editorWidget-border); border-radius: 3px; padding: 12px; background: var(--vscode-editorWidget-background); }
+    .prompt-pane h4 { margin-top: 0; font-size: 12px; color: var(--vscode-editorWidget-foreground); }
+    .prompt-text { font-family: monospace; font-size: 12px; line-height: 1.4; white-space: pre-wrap; word-wrap: break-word; max-height: 250px; overflow-y: auto; }
+    .prompt-diff-view { border: 1px solid var(--vscode-editorWidget-border); border-radius: 4px; overflow: hidden; background: var(--vscode-editor-background); font-family: var(--vscode-editor-font-family, monospace); }
+    .prompt-diff-line { display: flex; align-items: flex-start; gap: 10px; padding: 6px 10px; white-space: pre-wrap; word-break: break-word; border-bottom: 1px solid rgba(127,127,127,0.08); }
+    .prompt-diff-line:last-child { border-bottom: none; }
+    .prompt-diff-line-number { width: 40px; flex: 0 0 40px; text-align: right; opacity: 0.7; font-size: 11px; user-select: none; }
+    .prompt-diff-line-text { flex: 1; min-width: 0; }
+    .prompt-diff-line.deleted { background: rgba(204, 51, 51, 0.18); }
+    .prompt-diff-line.deleted .prompt-diff-line-text { color: #ffb4b4; }
+    .prompt-diff-line.added { background: rgba(51, 170, 90, 0.18); }
+    .prompt-diff-line.added .prompt-diff-line-text { color: #c8ffd7; }
+    .prompt-diff-line.updated { background: rgba(70, 120, 255, 0.18); }
+    .prompt-diff-line.updated .prompt-diff-line-text { color: #cddcff; }
+    .prompt-diff-line.unchanged { background: transparent; }
+    .prompt-diff-line-inline-old { text-decoration: line-through; opacity: 0.75; }
+    .prompt-diff-line-inline-new { font-weight: 600; }
+    .markdown-content { font-size: 12px; line-height: 1.6; }
+    .markdown-content h1, .markdown-content h2, .markdown-content h3 { margin-top: 12px; margin-bottom: 8px; }
+    .markdown-content p { margin: 6px 0; }
+    .markdown-content code { background: rgba(127,127,127,0.08); padding: 2px 6px; border-radius: 3px; }
+    .markdown-content pre { background: rgba(127,127,127,0.08); padding: 10px; border-radius: 3px; overflow-x: auto; }
+    .markdown-content ul, .markdown-content ol { margin: 8px 0 8px 20px; }
+    .detail-card-header { cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 10px; background: var(--vscode-editor-background); border: 1px solid var(--vscode-editorWidget-border); border-radius: 3px; margin-bottom: 8px; user-select: none; font-weight: 600; }
+    .detail-card-header:hover { background: var(--vscode-editor-selectionBackground); }
+    .detail-card-arrow { display: inline-block; transition: transform 0.2s; }
+    .detail-card-arrow.collapsed { transform: rotate(-90deg); }
+    .detail-card-body { padding: 12px; border: 1px solid var(--vscode-editorWidget-border); border-top: none; border-radius: 0 0 3px 3px; background: var(--vscode-editorWidget-background); margin-bottom: 12px; }
+    .detail-card-body.collapsed { display: none; }
+    .report-item { margin-bottom: 10px; }
+    .report-item strong { color: var(--vscode-textLink-foreground); }
+    .report-section { margin-bottom: 16px; }
+    .report-pane { flex: 0 0 350px; border-left: 1px solid var(--vscode-panel-border); padding-left: 16px; overflow-y: auto; }
+    .details-split { display: grid; grid-template-columns: 1fr 350px; gap: 16px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="sidebar">
+      <div class="filter-section">
+        <div class="filter-section-header">
+          <h2>Filters</h2>
+          <button id="filterToggleButton" class="filter-toggle-button" type="button" onclick="toggleFilterSection()">Hide</button>
+        </div>
+        <div id="filterSectionBody" class="filter-section-body">
+          <div class="form-group">
+            <label>Persona</label>
+            <select id="personaFilter" onchange="applyFilters()">
+              <option value="All">All</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Search</label>
+            <input type="text" id="searchInput" placeholder="Search key, workflow_id..." onkeyup="applyFilters()">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <div class="header">
+        <div class="header-top">
+          <h1>Prompt Optimization Candidates</h1>
+          <button id="mainFilterToggleButton" class="filter-toggle-button" type="button" onclick="toggleFilterSection()">Hide Filters</button>
+        </div>
+        <div class="info-row">Showing <strong id="filteredCount">0</strong> of <strong id="totalCount">0</strong> prompt optimization records</div>
+      </div>
+
+      <div class="content-split">
+        <div class="list-pane">
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th onclick="sort('key')" title="Click to sort">Key</th>
+                  <th onclick="sort('persona')" title="Click to sort">Persona</th>
+                  <th onclick="sort('workflow_id')" title="Click to sort">Workflow ID</th>
+                  <th onclick="sort('created_at')" title="Click to sort">Created At</th>
+                  <th onclick="sort('updated_at')" title="Click to sort">Updated At</th>
+                  <th onclick="sort('created_by')" title="Click to sort">Created By</th>
+                  <th onclick="sort('updated_by')" title="Click to sort">Updated By</th>
+                  <th onclick="sort('updated_prompt')" title="Click to sort">Updated Prompt</th>
+                </tr>
+              </thead>
+              <tbody id="tableBody">
+                <tr><td colspan="8" style="text-align: center; padding: 20px;">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="details-pane">
+          <div class="details-header">
+            <h2>Prompt Details</h2>
+            <div class="details-subtitle" id="detailsSubtitle">Select a candidate record to inspect the full prompt comparison.</div>
+          </div>
+          <div class="details-content">
+            <div id="detailsContent" class="details-empty">No candidate selected.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const vscode = acquireVsCodeApi();
+    let allRecords = [];
+    let filteredRecords = [];
+    let sortColumn = 'created_at';
+    let sortAsc = false;
+    let selectedKey = '';
+    let selectedWorkflowId = '';
+    let currentOptimizationReport = null;
+    let currentOptimizationReportWorkflowId = '';
+    let currentOptimizationReportAttemptedKey = '';
+    let currentOptimizationReportAvailableFields = [];
+    const webviewState = vscode.getState() || {};
+
+    if (webviewState.filtersCollapsed) {
+      requestAnimationFrame(() => applyFilterSectionState(true));
+    }
+
+    window.addEventListener('message', event => {
+      const message = event.data;
+      if (message.type === 'setData') {
+        allRecords = message.records || [];
+        filteredRecords = [...allRecords];
+        updatePersonaDropdown();
+        renderTable();
+        if (filteredRecords.length > 0) {
+          selectRecord(filteredRecords[0].key);
+        } else {
+          renderDetails(null);
+        }
+      } else if (message.type === 'optimizationReport') {
+        // store report and metadata, but only apply if it matches current selection
+        currentOptimizationReportAttemptedKey = message.attemptedKey || '';
+        currentOptimizationReportAvailableFields = message.availableFields || [];
+        if (message.workflowId && message.workflowId === selectedWorkflowId) {
+          currentOptimizationReport = message.report || null;
+          currentOptimizationReportWorkflowId = message.workflowId;
+          renderOptimizationReport();
+        }
+      } else if (message.type === 'actionResult') {
+        setActionStatus(message.message || '', Boolean(message.success));
+      }
+    });
+
+    function updatePersonaDropdown() {
+      const personas = ['All', ...new Set(allRecords.map(r => r.persona))].filter(Boolean);
+      const select = document.getElementById('personaFilter');
+      const currentValue = select.value;
+      select.innerHTML = personas.map(p => `<option value="${p}">${p}</option>`).join('');
+      select.value = currentValue || 'All';
+    }
+
+    function applyFilterSectionState(collapsed) {
+      const container = document.querySelector('.container');
+      const sidebarButton = document.getElementById('filterToggleButton');
+      const mainButton = document.getElementById('mainFilterToggleButton');
+      if (!container) return;
+      container.classList.toggle('sidebar-collapsed', collapsed);
+      if (sidebarButton) {
+        sidebarButton.textContent = collapsed ? 'Show' : 'Hide';
+      }
+      if (mainButton) {
+        mainButton.textContent = collapsed ? 'Show Filters' : 'Hide Filters';
+      }
+      vscode.setState({ ...webviewState, filtersCollapsed: collapsed });
+    }
+
+    function toggleFilterSection() {
+      const container = document.querySelector('.container');
+      if (!container) return;
+      applyFilterSectionState(!container.classList.contains('sidebar-collapsed'));
+    }
+
+    function applyFilters() {
+      const persona = document.getElementById('personaFilter').value;
+      const search = document.getElementById('searchInput').value.toLowerCase();
+
+      filteredRecords = allRecords.filter(r => {
+        if (persona !== 'All' && r.persona !== persona) return false;
+        if (search) {
+          const haystack = `${r.key} ${r.persona} ${r.workflow_id} ${r.updated_prompt}`.toLowerCase();
+          if (!haystack.includes(search)) return false;
+        }
+        return true;
+      });
+
+      renderTable();
+
+      if (filteredRecords.length > 0) {
+        const keepSelected = filteredRecords.find(r => r.key === selectedKey);
+        selectRecord((keepSelected || filteredRecords[0]).key);
+      } else {
+        selectedKey = '';
+        renderDetails(null);
+      }
+    }
+
+    function sort(column) {
+      if (sortColumn === column) {
+        sortAsc = !sortAsc;
+      } else {
+        sortColumn = column;
+        sortAsc = true;
+      }
+
+      filteredRecords.sort((a, b) => {
+        const aVal = String(a[column] || '');
+        const bVal = String(b[column] || '');
+        const cmp = aVal.localeCompare(bVal);
+        return sortAsc ? cmp : -cmp;
+      });
+
+      renderTable();
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById('tableBody');
+      document.getElementById('filteredCount').textContent = filteredRecords.length;
+      document.getElementById('totalCount').textContent = allRecords.length;
+
+      if (filteredRecords.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px;">No records found</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = filteredRecords.map(r => `
+        <tr class="${r.key === selectedKey ? 'selected-row' : ''}" onclick="selectRecord('${escapeJs(r.key)}')">
+          <td><span class="truncate">${escapeHtml(r.key)}</span></td>
+          <td>${escapeHtml(r.persona)}</td>
+          <td><span class="truncate">${escapeHtml(r.workflow_id)}</span></td>
+          <td>${escapeHtml(r.created_at)}</td>
+          <td>${escapeHtml(r.updated_at)}</td>
+          <td>${escapeHtml(r.created_by)}</td>
+          <td>${escapeHtml(r.updated_by)}</td>
+          <td><span class="truncate">${escapeHtml(r.updated_prompt.substring(0, 150))}</span></td>
+        </tr>
+      `).join('');
+    }
+
+    function selectRecord(key) {
+      selectedKey = key;
+      renderTable();
+      const record = filteredRecords.find(r => r.key === key) || allRecords.find(r => r.key === key);
+      selectedWorkflowId = record && record.workflow_id ? record.workflow_id : '';
+      currentOptimizationReport = null;
+      currentOptimizationReportWorkflowId = '';
+      renderDetails(record || null);
+      if (record && record.workflow_id) {
+        renderOptimizationReportLoading(record.workflow_id);
+        vscode.postMessage({
+          command: 'loadOptimizationReport',
+          workflowId: record.workflow_id
+        });
+      }
+    }
+
+    function renderDetails(record) {
+      const detailsContent = document.getElementById('detailsContent');
+      const subtitle = document.getElementById('detailsSubtitle');
+
+      if (!record) {
+        subtitle.textContent = 'Select a candidate record to inspect the full prompt comparison.';
+        detailsContent.className = 'details-empty';
+        detailsContent.innerHTML = 'No candidate selected.';
+        return;
+      }
+
+      console.log('[Webview] renderDetails called with record:', {
+        key: record.key,
+        workflow_id: record.workflow_id,
+        has_optimization_report: !!currentOptimizationReport,
+        report_keys: currentOptimizationReport ? Object.keys(currentOptimizationReport) : []
+      });
+
+      subtitle.textContent = `${record.persona || '-'} / ${record.workflow_id || '-'}`;
+      detailsContent.className = 'details-grid';
+
+      const originalPrompt = record.original_prompt || '';
+      const updatedPrompt = record.updated_prompt || '';
+      const reportKey = record.workflow_id ? `workflow:dev:prompt-optimizer:${record.workflow_id}` : '';
+
+      detailsContent.innerHTML = `
+        <div>
+          <div class="quick-select-wrapper" style="margin-bottom: 16px;">
+            <label style="display: block; font-size: 11px; margin-bottom: 6px; color: var(--vscode-descriptionForeground);">Quick Select Candidate</label>
+            <select class="quick-select" id="quickSelectDropdown" onchange="selectRecord(this.value)">
+              ${filteredRecords.map(r => 
+                `<option value="${escapeHtml(r.key)}" ${r.key === record.key ? 'selected' : ''}>${escapeHtml(r.key.substring(0, 60))}</option>`
+              ).join('')}
+            </select>
+          </div>
+
+          <div class="detail-card-header" onclick="toggleDetailCard(this)">
+            <span class="detail-card-arrow">▼</span>
+            <strong>Summary</strong>
+          </div>
+          <div class="detail-card-body">
+            <div class="detail-item"><span class="detail-label">Key</span><div class="detail-value">${escapeHtml(record.key || '-')}</div></div>
+            <div class="detail-item"><span class="detail-label">Persona</span><div class="detail-value">${escapeHtml(record.persona || '-')}</div></div>
+            <div class="detail-item"><span class="detail-label">Workflow ID</span><div class="detail-value">${escapeHtml(record.workflow_id || '-')}</div></div>
+            <div class="detail-item"><span class="detail-label">Created At</span><div class="detail-value">${escapeHtml(record.created_at || '-')}</div></div>
+            <div class="detail-item"><span class="detail-label">Created By</span><div class="detail-value">${escapeHtml(record.created_by || '-')}</div></div>
+            <div class="detail-item"><span class="detail-label">Original Prompt Ref</span><div class="detail-value">${escapeHtml(record.original_prompt_ref || '-')}</div></div>
+            <div class="detail-item"><span class="detail-label">Updated At</span><div class="detail-value">${escapeHtml(record.updated_at || '-')}</div></div>
+            <div class="detail-item"><span class="detail-label">Updated By</span><div class="detail-value">${escapeHtml(record.updated_by || '-')}</div></div>
+          </div>
+
+          <div id="optimizationReportContainer"></div>
+
+          <div class="button-group" style="margin-bottom: 12px;">
+            <button class="button-save" onclick="acceptPrompt('${escapeJs(record.key)}')">Accept</button>
+            <button class="button-reset" onclick="rejectPrompt('${escapeJs(record.key)}')">Reject</button>
+          </div>
+          <div id="actionStatus" style="margin-bottom: 12px; font-size: 12px; color: var(--vscode-descriptionForeground);"></div>
+
+          ${originalPrompt && updatedPrompt ? `
+            <div class="detail-card-header" onclick="toggleDetailCard(this)">
+              <span class="detail-card-arrow">▼</span>
+              <strong>Prompt Comparison</strong>
+            </div>
+            <div class="detail-card-body">
+              <div class="prompt-diff-view">${renderPromptDiff(originalPrompt, updatedPrompt)}</div>
+            </div>
+          ` : ''}
+
+          <div class="detail-card-header" onclick="toggleDetailCard(this)">
+            <span class="detail-card-arrow collapsed">▼</span>
+            <strong>Edit Candidate Prompt</strong>
+          </div>
+          <div class="detail-card-body collapsed">
+            <textarea class="prompt-editor" id="promptEditor">${escapeHtml(updatedPrompt)}</textarea>
+            <div class="button-group">
+              <button class="button-save" onclick="savePrompt('${escapeJs(record.key)}')">Save</button>
+              <button class="button-reset" onclick="resetPrompt()">Reset</button>
+              <button class="button-reload" onclick="reloadPrompt('${escapeJs(record.key)}')">Reload</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      renderOptimizationReport();
+    }
+
+    function renderOptimizationReportLoading(workflowId) {
+      const reportContainer = document.getElementById('optimizationReportContainer');
+      if (!reportContainer) return;
+      reportContainer.innerHTML = `
+        <div class="detail-card-header" onclick="toggleDetailCard(this)">
+          <span class="detail-card-arrow">▼</span>
+          <strong>📊 Optimization Report</strong>
+        </div>
+        <div class="detail-card-body">
+          <p style="color: var(--vscode-descriptionForeground); font-size: 12px; margin: 0;">Loading optimization report from workflow:dev:prompt-optimizer:${escapeHtml(workflowId)}...</p>
+        </div>
+      `;
+    }
+
+    function renderOptimizationReport() {
+      const reportContainer = document.getElementById('optimizationReportContainer');
+      if (!reportContainer) return;
+
+      const record = filteredRecords.find(r => r.key === selectedKey) || allRecords.find(r => r.key === selectedKey);
+      if (!record) return;
+
+      const reportKey = record.workflow_id ? `workflow:dev:prompt-optimizer:${record.workflow_id}` : 'workflow:dev:prompt-optimizer:&lt;workflow-id&gt;';
+      const reportData = currentOptimizationReport && currentOptimizationReportWorkflowId === record.workflow_id
+        ? currentOptimizationReport
+        : null;
+
+      const attemptedKeyToShow = currentOptimizationReportAttemptedKey || reportKey;
+      const availableFieldsHtml = currentOptimizationReportAvailableFields && currentOptimizationReportAvailableFields.length > 0
+        ? `<div style="margin-top:8px; font-size:11px; color:var(--vscode-descriptionForeground);">Available fields: <strong>${escapeHtml(currentOptimizationReportAvailableFields.join(', '))}</strong></div>`
+        : '';
+
+      reportContainer.innerHTML = `
+        <div class="detail-card-header" onclick="toggleDetailCard(this)">
+          <span class="detail-card-arrow">▼</span>
+          <strong>📊 Optimization Report</strong>
+        </div>
+        <div class="detail-card-body">
+          ${reportData
+            ? `<div class="markdown-content">${typeof reportData === 'string' ? renderMarkdown(reportData) : renderMarkdown(JSON.stringify(reportData, null, 2))}</div>`
+            : `<div><p style="color: var(--vscode-descriptionForeground); font-size: 12px; margin: 0;">Optimization report with key ${escapeHtml(attemptedKeyToShow)} not found.</p>${availableFieldsHtml}</div>`
+          }
+        </div>
+      `;
+    }
+
+    function toggleDetailCard(header) {
+      const body = header.nextElementSibling;
+      const arrow = header.querySelector('.detail-card-arrow');
+      body.classList.toggle('collapsed');
+      arrow.classList.toggle('collapsed');
+    }
+
+    function toggleCollapsible(header) {
+      const content = header.nextElementSibling;
+      const arrow = header.querySelector('.collapsible-arrow');
+      content.classList.toggle('open');
+      arrow.classList.toggle('collapsed');
+    }
+
+    function renderPromptDiff(originalText, updatedText) {
+      const originalLines = String(originalText || '').split('\n');
+      const updatedLines = String(updatedText || '').split('\n');
+      const diffOps = buildLineDiff(originalLines, updatedLines);
+      return diffOps.map(op => {
+        if (op.type === 'deleted') {
+          return `<div class="prompt-diff-line deleted"><div class="prompt-diff-line-number">-${escapeHtml(String(op.oldLineNo))}</div><div class="prompt-diff-line-text">${escapeHtml(op.text)}</div></div>`;
+        }
+        if (op.type === 'added') {
+          return `<div class="prompt-diff-line added"><div class="prompt-diff-line-number">+${escapeHtml(String(op.newLineNo))}</div><div class="prompt-diff-line-text">${escapeHtml(op.text)}</div></div>`;
+        }
+        if (op.type === 'updated') {
+          return `<div class="prompt-diff-line updated"><div class="prompt-diff-line-number">~${escapeHtml(String(op.oldLineNo))}</div><div class="prompt-diff-line-text"><span class="prompt-diff-line-inline-old">${escapeHtml(op.oldText)}</span><br><span class="prompt-diff-line-inline-new">${escapeHtml(op.newText)}</span></div></div>`;
+        }
+        return `<div class="prompt-diff-line unchanged"><div class="prompt-diff-line-number">${escapeHtml(String(op.oldLineNo || op.newLineNo || ' '))}</div><div class="prompt-diff-line-text">${escapeHtml(op.text)}</div></div>`;
+      }).join('');
+    }
+
+    function buildLineDiff(originalLines, updatedLines) {
+      const rows = [];
+      const m = originalLines.length;
+      const n = updatedLines.length;
+      const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+
+      for (let i = m - 1; i >= 0; i--) {
+        for (let j = n - 1; j >= 0; j--) {
+          dp[i][j] = originalLines[i] === updatedLines[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+      }
+
+      let i = 0;
+      let j = 0;
+      while (i < m && j < n) {
+        if (originalLines[i] === updatedLines[j]) {
+          rows.push({ type: 'unchanged', text: originalLines[i], oldLineNo: i + 1, newLineNo: j + 1 });
+          i += 1;
+          j += 1;
+          continue;
+        }
+
+        if (dp[i + 1][j] >= dp[i][j + 1]) {
+          if (j < n && i < m) {
+            rows.push({ type: 'updated', oldText: originalLines[i], newText: updatedLines[j], oldLineNo: i + 1, newLineNo: j + 1 });
+            i += 1;
+            j += 1;
+          } else {
+            rows.push({ type: 'deleted', text: originalLines[i], oldLineNo: i + 1 });
+            i += 1;
+          }
+        } else {
+          rows.push({ type: 'added', text: updatedLines[j], newLineNo: j + 1 });
+          j += 1;
+        }
+      }
+
+      while (i < m) {
+        rows.push({ type: 'deleted', text: originalLines[i], oldLineNo: i + 1 });
+        i += 1;
+      }
+
+      while (j < n) {
+        rows.push({ type: 'added', text: updatedLines[j], newLineNo: j + 1 });
+        j += 1;
+      }
+
+      return rows;
+    }
+
+    function setActionStatus(message, isSuccess) {
+      const status = document.getElementById('actionStatus');
+      if (!status) return;
+      status.textContent = message || '';
+      status.style.color = isSuccess ? 'var(--vscode-terminal-ansiGreen)' : 'var(--vscode-errorForeground)';
+    }
+
+    function savePrompt(key) {
+      const editor = document.getElementById('promptEditor');
+      if (!editor) return;
+      const updatedText = editor.value;
+      setActionStatus('Saving candidate prompt...', true);
+      vscode.postMessage({ 
+        command: 'savePrompt', 
+        key: key, 
+        updatedPrompt: updatedText 
+      });
+    }
+
+    function acceptPrompt(key) {
+      const editor = document.getElementById('promptEditor');
+      if (!editor) return;
+      setActionStatus('Saving to latest system prompt...', true);
+      vscode.postMessage({
+        command: 'acceptPrompt',
+        key: key,
+        updatedPrompt: editor.value,
+      });
+    }
+
+    function rejectPrompt(key) {
+      const editor = document.getElementById('promptEditor');
+      if (!editor) return;
+      setActionStatus('Rejecting candidate prompt...', false);
+      vscode.postMessage({
+        command: 'rejectPrompt',
+        key: key,
+        updatedPrompt: editor.value,
+      });
+    }
+
+    function resetPrompt() {
+      if (selectedKey) {
+        const record = allRecords.find(r => r.key === selectedKey);
+        if (record) {
+          const editor = document.getElementById('promptEditor');
+          if (editor) {
+            editor.value = record.updated_prompt || '';
+          }
+        }
+      }
+    }
+
+    function reloadPrompt(key) {
+      vscode.postMessage({ 
+        command: 'reloadPrompt', 
+        key: key 
+      });
+    }
+
+    function escapeHtml(text) {
+      const map = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'};
+      return String(text).replace(/[&<>"']/g, m => map[m]);
+    }
+
+    function escapeJs(text) {
+      return String(text).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    }
+
+    function renderMarkdown(text) {
+      if (!text) return '';
+      try {
+        return marked.parse(String(text));
+      } catch (e) {
+        console.error('Markdown parse error:', e);
+        return escapeHtml(text);
+      }
+    }
+
+    vscode.postMessage({ command: 'init' });
+  </script>
+</body>
+</html>

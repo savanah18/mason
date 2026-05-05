@@ -10,6 +10,8 @@ import threading
 from typing import Dict, Iterator, List, Literal, Optional, Union, Any
 from datetime import datetime
 
+import redis
+
 
 # Memory Managment
 from transformers import AutoTokenizer
@@ -45,6 +47,9 @@ from templates.core.workflows import (
 )
 
 from templates.memory.management.agent_memory_mixin import MemoryManagementMixin
+
+from notifications.mailer import send_notification
+
 
 # TODO create a function instead
 PERSONA = os.getenv("PERSONA","deployer")
@@ -103,6 +108,23 @@ _load_prompt_optimization_tools()
 
 
 class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryManagementMixin):
+    # Redis client and section payload loader moved to `templates.core.base.BaseAgent`.
+
+    @staticmethod
+    def _initialize_sensors_from_payload(payload: dict[str, Any]) -> List[Sensor]:
+        sensors: List[Sensor] = []
+        for sensor in payload.get("spec", []):
+            sensor_cls = globals().get(sensor.get("type"))
+            config_cls = globals().get(sensor.get("config_type"))
+            if sensor_cls is None or config_cls is None:
+                raise ValueError(f"Unsupported sensor definition: {sensor}")
+            sensors.append(sensor_cls(config=config_cls.from_json(sensor)))
+        return sensors
+
+    @staticmethod
+    def _initialize_mcp_cfg_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        return payload.get("spec", {}) if isinstance(payload, dict) else {}
+
     def __init__(
         self,
         goal: Union[Goal, Path, str],
@@ -123,24 +145,55 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
             goal: Goal = self._initialize_goal(goal)
 
         prompt_updater = PromptUpdater()
-        self.system_prompt_status = prompt_updater.update_system_prompt_with_status(PERSONA)
-        print(f"[PromptUpdater] update_system_prompt(persona={PERSONA}) -> {self.system_prompt_status}")
+
+        # Prefer prompt from Redis; only read/write YAML when Redis has no latest
+        try:
+            redis_prompt, remarks, feedback = prompt_updater.get_latest_system_prompt(PERSONA)
+        except Exception:
+            redis_prompt = None
+
+        if redis_prompt:
+            self._resolved_system_prompt = redis_prompt
+            self.system_prompt_status = {"success": True, "updated": False, "reason": "from-redis", "latest_key": None}
+            print(f"[PromptUpdater] using redis latest prompt for persona={PERSONA}")
+        else:
+            # No redis prompt: load from file and historize it
+            self.system_prompt_status = prompt_updater.update_system_prompt_with_status(PERSONA)
+            print(f"[PromptUpdater] created/updated prompt from file for persona={PERSONA} -> {self.system_prompt_status}")
+            try:
+                redis_prompt, remarks, feedback = prompt_updater.get_latest_system_prompt(PERSONA)
+            except Exception:
+                redis_prompt = None
+            self._resolved_system_prompt = redis_prompt if redis_prompt else f"{goal.description}"
 
         # sensory tools
+        sensor_payload = self._load_section_payload_from_redis(PERSONA, "sensors")
         if isinstance(sensors, str) or isinstance(sensors, Path):
-            sensors: List[Sensor] = self._initialize_sensors(sensors)
+            sensors = self._initialize_sensors_from_payload(sensor_payload) if sensor_payload else self._initialize_sensors(sensors)
 
         # actuators
+        actuator_payload = self._load_section_payload_from_redis(PERSONA, "actuators")
+        mcp_tools: List[Any] = []
+        function_tools: List[Any] = []
         if isinstance(actuators, str) or isinstance(actuators, Path):
-            actuators  = self._initialize_mcp_cfg(actuators)
-            exclude_tools = actuators['exclude-tools']
+            actuators = self._initialize_mcp_cfg_from_payload(actuator_payload) if actuator_payload else self._initialize_mcp_cfg(actuators)
+
+        if isinstance(actuators, dict):
+            exclude_tools = actuators.get('exclude-tools', [])
             mcp_tools = self._load_mcp_tools(actuators, exclude_tools)
-            function_tools = actuators['builtin-functions']
+            function_tools = actuators.get('builtin-functions', [])
             self.tools_count = len(mcp_tools + function_tools)
 
         # memory
         self.sessions = {} # PLACEHOLDER ONLY
         self.memory_client = self._initialize_memory_manager()
+
+        # notification
+        self.email_notification_enabled = os.getenv("EMAIL_NOTIFICATION_ENABLED", "false").lower() == "true"
+        if self.email_notification_enabled:
+            print("📧 Email notifications enabled. Loading email app password from file...")
+            with open(os.getenv("EMAIL_APP_PASSWORD_FILE"), "r") as f:
+                self.email_app_password = f.read().strip()
 
         # print(f"[I] Initializing {PERSONA} agent with goal \n {goal.description}")
         # Initialize AutonomousAgent
@@ -155,7 +208,7 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         Assistant.__init__(
             self,
             llm=llm_cfg,
-            system_message=f"{goal.description}",
+            system_message=self._resolved_system_prompt,
             function_list= function_tools + mcp_tools,
             files=[]
         )
@@ -316,16 +369,25 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
         workflow_exec.system_prompt_ref = self.system_prompt_status.get("latest_key", None) if self.system_prompt_status else None
         workflow_exec.thoughts = thoughts
 
-        # record 
-        print("Recording workflow state")
-        workflow_exec.record_workflow_state()
-        #****************** END OF WORKFLOW STATS AND TRACEABILITY ******************
-
-
         if workflow_exec.all_tools_verified:
             print("All tool calls verified!")
         else:
             assistant_response = f"Unverified Tool Calls Found!"
+
+        # record workflow
+        print("Recording workflow state")
+        workflow_exec.record_workflow_state()
+        #****************** END OF WORKFLOW STATS AND TRACEABILITY *******************
+
+        #****************** START OF NOTIFICATION ******************
+        if self.email_notification_enabled:
+            send_notification(
+                recipient_email="aglubagerry@gmail.com",
+                subject=f"Workflow Execution Complete - {workflow_id}",
+                body=workflow_exec.result,
+                app_password=self.email_app_password
+            )
+
 
 
         #****************** START OF HISTORIZATION ******************

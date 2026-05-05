@@ -41,6 +41,8 @@ secrets:
     file: ./.secrets/oci-registry
   kubernetes-config:
     file: ~/.kube/config
+  google-app-token:
+    file: ~/.google-app-token
 
 
 services:
@@ -149,9 +151,9 @@ services:
     networks:
       - triton-ai-network
 
-  # Agents
-  deployer-agent:
-    profiles: ["agent", "standard"]
+  # Agent Management and Orchestration
+  agent-manager:
+    profiles: ["agent-manager", "standard"]
     build:
       context: ./agent/
       dockerfile: ./Dockerfile.agents
@@ -159,20 +161,48 @@ services:
         templates: ./agent/templates
         actions: ./agent/actions
         memory: ./agent/memory
+        notifications: ./agent/notifications
+        management: ../management
     image: agent-generic:latest
-    container_name: deployer-agent
-    secrets: 
-    - oci-registry 
-    - kubernetes-config
-    environment: 
-      <<: *common-agent-env
-      PERSONA: deployer
+    container_name: agent-manager
     volumes:
     - ./agent/personas:/app/personas:rw
     - ./agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw # for dev purposes only
     - ./agent/templates:/app/templates:rw
     - ./agent/actions/:/app/actions:rw
     - ./agent/memory/:/app/memory:rw
+    - ./agent/notifications/:/app/notifications:rw
+    - /var/run/docker.sock:/var/run/docker.sock
+    command: >
+      cd /mananagement && uvicorn backend.app:app --host 0.0.0.0 --port 8010
+    ports:
+      - "8002:8002"
+    networks:
+      - triton-ai-network
+
+    restart: unless-stopped
+
+  # Agents
+  deployer-agent:
+    profiles: ["agent", "standard"]
+    container_name: deployer-agent
+    secrets: 
+    - oci-registry 
+    - kubernetes-config
+    - google-app-token
+    environment: 
+      <<: *common-agent-env
+      PERSONA: deployer
+      EMAIL_NOTIFICATION_ENABLED: "true"
+      EMAIL_APP_PASSWORD_FILE: /run/secrets/google-app-token
+
+    volumes:
+    - ./agent/personas:/app/personas:rw
+    - ./agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw # for dev purposes only
+    - ./agent/templates:/app/templates:rw
+    - ./agent/actions/:/app/actions:rw
+    - ./agent/memory/:/app/memory:rw
+    - ./agent/notifications/:/app/notifications:rw
     - source: *host_model_ckpt
       target: /mnt/checkpoint
       type: bind
@@ -197,8 +227,11 @@ services:
     secrets: 
     - oci-registry 
     - kubernetes-config
+    - google-app-token
     environment: 
       PERSONA: resiliency-optimizer
+      EMAIL_NOTIFICATION_ENABLED: "true"
+      EMAIL_APP_PASSWORD_FILE: /run/secrets/google-app-token
       <<: 
       - *common-agent-env
       - *prometheus-env
@@ -208,6 +241,7 @@ services:
     - ./agent/templates:/app/templates:rw
     - ./agent/actions/:/app/actions:rw
     - ./agent/memory/:/app/memory:rw
+    - ./agent/notifications/:/app/notifications:rw
     - source: *host_model_ckpt
       target: /mnt/checkpoint
       type: bind
@@ -242,6 +276,7 @@ services:
     - ./agent/templates:/app/templates:rw
     - ./agent/actions/:/app/actions:rw
     - ./agent/memory/:/app/memory:rw
+    - ./agent/notifications/:/app/notifications:rw
     - source: *host_model_ckpt
       target: /mnt/checkpoint
       type: bind

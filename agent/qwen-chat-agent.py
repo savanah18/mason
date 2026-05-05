@@ -4,7 +4,7 @@ Provides stateless REST API for chat operations
 """
 import os
 from datetime import datetime
-from typing import Dict
+from typing import Dict, List
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -14,7 +14,8 @@ from templates.data_models.chat import (
     ChatMessage,
     ChatRequest,
     ChatResponse,
-    ChatHistory
+    ChatHistory,
+    SessionSummary
 )
 from templates.data_models.health import HealthResponse
 from templates.core.chat_agent import ChatAgentBackend
@@ -149,11 +150,21 @@ async def get_history(session_id: str):
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     
+    #print(backend.get_session_messages_as_dicts(session))
+    msgs = backend.get_session_messages_as_dicts(session)
     return ChatHistory(
         session_id=session_id,
-        messages=[ChatMessage(**msg) for msg in session.messages],
-        created_at=session.created_at
+        messages=[ChatMessage(**msg) for msg in msgs]
     )
+
+
+@app.get("/session/latest", response_model=List[SessionSummary])
+async def get_latest_sessions(offset: int = 10):
+    """Get the latest working-memory sessions."""
+    if not backend:
+        raise HTTPException(status_code=503, detail="Backend not initialized")
+
+    return await backend.get_latest_sessions(offset=offset)
 
 
 @app.post("/chat/clear/{session_id}", response_model=Dict[str, bool])

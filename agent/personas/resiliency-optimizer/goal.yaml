@@ -68,7 +68,7 @@ spec:
       - Report if targets and constraints are met. 
     - Recommend CPU/memory requests and limits and number of replicas considering targets and constraints.
     - Double-check the target container before applying updates.  
-    - Apply resource patches to high-impact services 
+    - Apply resource patches to high-impact services only (Ideally top 5)
       - **IMPORTANT** Use `kubernetes-apply-resource-update` tool to apply updates. 
 
     5. **Output**

@@ -163,6 +163,30 @@ class PromptUpdater:
 		port = int(os.getenv("REDIS_PORT", str(self.redis_port)))
 		return redis.Redis(host=host, port=port, decode_responses=True)
 
+	def get_latest_system_prompt(self, persona: str):
+		"""Return the latest system prompt stored in Redis for a persona.
+
+		Returns: (prompt_str or None, remarks dict or {}, feedback str or None)
+		"""
+		try:
+			client = self._redis_client()
+			latest_key = f"system-prompts:{persona}:latest"
+			data = client.hgetall(latest_key) or {}
+			if not data or not data.get("prompt"):
+				return None, {}, None
+			prompt = data.get("prompt")
+			remarks = {}
+			feedback = data.get("feedback") or ""
+			try:
+				if data.get("remarks"):
+					remarks = json.loads(data.get("remarks"))
+			except Exception:
+				remarks = {}
+			return prompt, remarks, feedback
+		except Exception as exc:
+			print(f"[PromptUpdater] Failed reading latest prompt from redis for persona={persona}: {exc}")
+			return None, {}, None
+
 	@staticmethod
 	def _now_key_suffix() -> str:
 		return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

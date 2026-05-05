@@ -4,12 +4,24 @@ import * as path from 'path';
 import type { Consumer, SASLOptions } from 'kafkajs';
 
 type ChatMessage = { id: number; sender: 'user' | 'assistant'; text: string };
+type SessionSummary = {
+  session_id: string;
+  timestamp: number;
+  first_user_message?: string | null;
+};
+type ChatHistoryResponse = {
+  session_id: string;
+  messages: Array<{ role: string; content: string }>;
+  created_at: string;
+};
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8002';
 const CHAT_VERSION = '0.5.0';
 const CHAT_ENDPOINT = `${BACKEND_URL}/chat/send`;
 const HEALTH_ENDPOINT = `${BACKEND_URL}/health`;
 const CREATE_SESSION_ENDPOINT = `${BACKEND_URL}/session/create`;
+const LATEST_SESSIONS_ENDPOINT = `${BACKEND_URL}/session/latest`;
+const CHAT_HISTORY_ENDPOINT = `${BACKEND_URL}/chat/history`;
 const CLEAR_CHAT_ENDPOINT = `${BACKEND_URL}/chat/clear`;
 const MAX_MESSAGES_IN_UI = 100;
 const REQUEST_TIMEOUT_MS = (() => {
@@ -70,6 +82,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const openChatAliasDisposable2 = vscode.commands.registerCommand('aichat.openChat', () => {
       ChatPanel.createOrShow(context);
+    });
+
+    const selectSessionDisposable = vscode.commands.registerCommand('aiChat.selectSession', async () => {
+      await ChatPanel.openSessionPicker(context);
     });
 
     const kafkaStatusDisposable = vscode.commands.registerCommand('aiChat.notificationsStatus', () => {
@@ -143,6 +159,7 @@ export function activate(context: vscode.ExtensionContext): void {
       chatDisposable,
       openChatAliasDisposable,
       openChatAliasDisposable2,
+      selectSessionDisposable,
       kafkaStatusDisposable,
       kafkaRestartDisposable,
       testNotificationDisposable,
@@ -544,6 +561,7 @@ class KafkaNotificationSubscriber {
 class ChatPanel {
   private static instance: ChatPanel | undefined;
   private readonly panel: vscode.WebviewPanel;
+  private readonly readyPromise: Promise<void>;
   private webviewReady = false;
   private messages: ChatMessage[] = [
     {
@@ -557,6 +575,7 @@ class ChatPanel {
   private backendReady = false;
   private isLoading = false;
   private sessionId = '';
+  private sessionLabel = 'No session selected';
 
   private constructor(private readonly context: vscode.ExtensionContext) {
     this.panel = vscode.window.createWebviewPanel('aiChat', 'AI Chat', vscode.ViewColumn.Beside, {
@@ -568,7 +587,7 @@ class ChatPanel {
     this.panel.webview.onDidReceiveMessage(msg => this.handleMessage(msg));
     this.panel.webview.html = this.renderHtml();
 
-    this.initialize();
+    this.readyPromise = this.initialize();
   }
 
   static createOrShow(context: vscode.ExtensionContext): void {
@@ -581,6 +600,19 @@ class ChatPanel {
 
   static disposeInstance(): void {
     ChatPanel.instance?.dispose();
+  }
+
+  static async openSessionPicker(context: vscode.ExtensionContext): Promise<void> {
+    if (!ChatPanel.instance) {
+      ChatPanel.createOrShow(context);
+    }
+
+    if (!ChatPanel.instance) {
+      return;
+    }
+
+    await ChatPanel.instance.readyPromise;
+    await ChatPanel.instance.selectSession();
   }
 
   static pushExternalNotification(text: string): void {
@@ -646,12 +678,105 @@ class ChatPanel {
       if (response.ok) {
         const data = (await response.json()) as { session_id?: string };
         this.sessionId = data.session_id ?? '';
-        this.addMessage('assistant', `Session: ${this.sessionId.substring(0, 12)}...`);
+        this.sessionLabel = `Active session: ${this.sessionId.substring(0, 12)}...`;
+        this.addMessage('assistant', this.sessionLabel);
+        this.pushState();
       } else {
         throw new Error(`${response.status}`);
       }
     } catch (error) {
       this.addMessage('assistant', `Session error: ${error}`);
+    }
+  }
+
+  private async fetchLatestSessions(offset = 10): Promise<SessionSummary[]> {
+    const url = `${LATEST_SESSIONS_ENDPOINT}?offset=${encodeURIComponent(String(offset))}`;
+    const response = await this.fetchWithTimeout(url, { method: 'GET' }, HEALTH_CHECK_TIMEOUT_MS);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = (await response.json()) as SessionSummary[];
+    return Array.isArray(data) ? data : [];
+  }
+
+  private formatSessionLabel(sessionId: string, firstUserMessage?: string | null): string {
+    const shortId = sessionId.substring(0, 12);
+    if (firstUserMessage && firstUserMessage.trim()) {
+      return `${shortId} • ${firstUserMessage.trim()}`;
+    }
+    return `${shortId}...`;
+  }
+
+  private async loadSession(sessionId: string, preview?: string | null): Promise<void> {
+    if (!sessionId) {
+      return;
+    }
+
+    const response = await this.fetchWithTimeout(`${CHAT_HISTORY_ENDPOINT}/${encodeURIComponent(sessionId)}`, { method: 'GET' }, HEALTH_CHECK_TIMEOUT_MS);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = (await response.json()) as ChatHistoryResponse;
+    const historyMessages = Array.isArray(data.messages)
+      ? data.messages.map((message, index) => ({
+          id: index + 1,
+          sender: (message.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+          text: message.content,
+        }))
+      : [];
+
+    this.sessionId = sessionId;
+    this.sessionLabel = this.formatSessionLabel(sessionId, preview ?? null);
+    this.messages = historyMessages.length > 0
+      ? historyMessages
+      : [{ id: 1, sender: 'assistant', text: 'Selected session is empty.' }];
+    this.nextId = this.messages.length + 1;
+    this.pushState();
+  }
+
+  private async selectSession(): Promise<void> {
+    try {
+      if (!this.backendReady) {
+        await this.checkBackendHealth();
+      }
+
+      if (!this.backendReady) {
+        vscode.window.showWarningMessage('AI Chat backend is not ready.');
+        return;
+      }
+
+      const sessions = await this.fetchLatestSessions(10);
+      if (!sessions.length) {
+        vscode.window.showInformationMessage('No past sessions were found.');
+        return;
+      }
+
+      const picked = await vscode.window.showQuickPick(
+        sessions.map(session => ({
+          label: this.formatSessionLabel(session.session_id, session.first_user_message),
+          description: new Date(session.timestamp * 1000).toLocaleString(),
+          detail: session.session_id,
+          session,
+        })),
+        {
+          placeHolder: 'Select a past AI Chat session',
+          ignoreFocusOut: true,
+        },
+      );
+
+      if (!picked) {
+        return;
+      }
+
+      await this.loadSession(picked.session.session_id, picked.session.first_user_message ?? null);
+      vscode.window.showInformationMessage(`Selected session ${picked.session.session_id.substring(0, 12)}...`);
+    } catch (error) {
+      vscode.window.showErrorMessage(`AI Chat session selection failed: ${error}`);
+      this.addMessage('assistant', `Session selection error: ${error}`);
+      this.pushState();
     }
   }
 
@@ -685,6 +810,11 @@ class ChatPanel {
 
     if (message.action === 'clear-chat') {
       await this.clearChat();
+      return;
+    }
+
+    if (message.action === 'open-sessions') {
+      await this.selectSession();
     }
   }
 

@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    .truncate { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
+    .filter-section-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+    .filter-toggle-button { padding: 6px 10px; border: 1px solid var(--vscode-button-border); border-radius: 3px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); cursor: pointer; font-size: 12px; }
+    .filter-toggle-button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+    .filter-section-body.collapsed { display: none; }
+    .header-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .markdown-content { font-size: 12px; line-height: 1.6; }
+    .markdown-content h1, .markdown-content h2, .markdown-content h3 { margin-top: 12px; margin-bottom: 8px; }
+    .markdown-content p { margin: 6px 0; }
+    .markdown-content code { background: rgba(127,127,127,0.08); padding: 2px 6px; border-radius: 3px; }
+    .markdown-content pre { background: rgba(127,127,127,0.08); padding: 10px; border-radius: 3px; overflow-x: auto; }
+    .markdown-content ul, .markdown-content ol { margin: 8px 0 8px 20px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="sidebar">
+      <div class="filter-section">
+        <div class="filter-section-header">
+          <h2>Filters</h2>
+          <button id="filterToggleButton" class="filter-toggle-button" type="button" onclick="toggleFilterSection()">Hide</button>
+        </div>
+        <div id="filterSectionBody" class="filter-section-body">
+          <div class="form-group">
+            <label>Persona</label>
+            <select id="personaFilter" onchange="applyFilters()">
+              <option value="All">All</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Search Workflows</label>
+            <input type="text" id="searchInput" placeholder="Search key, task, result..." onkeyup="applyFilters()">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <div class="header">
+        <div class="header-top">
+          <h1>Workflow</h1>
+          <button id="mainFilterToggleButton" class="filter-toggle-button" type="button" onclick="toggleFilterSection()">Hide Filters</button>
+        </div>
+        <div class="info-row">Showing <strong id="filteredCount">0</strong> of <strong id="totalCount">0</strong> workflow records</div>
+      </div>
+
+      <div class="content-split">
+        <div class="list-pane">
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th onclick="sort('key')" title="Click to sort">Key</th>
+                  <th onclick="sort('persona')" title="Click to sort">Persona</th>
+                  <th onclick="sort('workflow_id')" title="Click to sort">Workflow ID</th>
+                  <th onclick="sort('created_on')" title="Click to sort">Created At</th>
+                  <th onclick="sort('task')" title="Click to sort">Task</th>
+                  <th onclick="sort('result')" title="Click to sort">Result</th>
+                </tr>
+              </thead>
+              <tbody id="tableBody">
+                <tr><td colspan="6" style="text-align: center; padding: 20px;">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="details-pane">
+          <div class="details-header">
+            <h2>Workflow Details</h2>
+            <div class="details-subtitle" id="detailsSubtitle">Select a workflow record to inspect the full payload.</div>
+          </div>
+          <div class="details-content">
+            <div id="detailsContent" class="details-empty">No workflow selected.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const vscode = acquireVsCodeApi();
+    let allRecords = [];
+    let filteredRecords = [];
+    let sortColumn = 'created_on';
+    let sortAsc = false;
+    let selectedKey = '';
+    const NULL_PLACEHOLDER = 'null';
+    const webviewState = vscode.getState() || {};
+
+    if (webviewState.filtersCollapsed) {
+      requestAnimationFrame(() => applyFilterSectionState(true));
+    }
+
+    // Load initial data
+    window.addEventListener('message', event => {
+      const message = event.data;
+      if (message.type === 'setData') {
+        allRecords = message.records || [];
+        filteredRecords = [...allRecords];
+        updatePersonaDropdown();
+        sortColumn = 'created_on';
+        sortAsc = false;
+        sortAndRender(true);
+        if (filteredRecords.length > 0) {
+          selectRecord(filteredRecords[0].key);
+        } else {
+          renderDetails(null);
+        }
+      }
+    });
+
+    function updatePersonaDropdown() {
+      const personas = ['All', ...new Set(allRecords.map(r => r.persona))].filter(Boolean);
+      const select = document.getElementById('personaFilter');
+      const currentValue = select.value;
+      select.innerHTML = personas.map(p => `<option value="${p}">${p}</option>`).join('');
+      select.value = currentValue || 'All';
+    }
+
+    function applyFilterSectionState(collapsed) {
+      const container = document.querySelector('.container');
+      const sidebarButton = document.getElementById('filterToggleButton');
+      const mainButton = document.getElementById('mainFilterToggleButton');
+      if (!container) return;
+      container.classList.toggle('sidebar-collapsed', collapsed);
+      if (sidebarButton) {
+        sidebarButton.textContent = collapsed ? 'Show' : 'Hide';
+      }
+      if (mainButton) {
+        mainButton.textContent = collapsed ? 'Show Filters' : 'Hide Filters';
+      }
+      vscode.setState({ ...webviewState, filtersCollapsed: collapsed });
+    }
+
+    function toggleFilterSection() {
+      const container = document.querySelector('.container');
+      if (!container) return;
+      applyFilterSectionState(!container.classList.contains('sidebar-collapsed'));
+    }
+
+    function applyFilters() {
+      const persona = document.getElementById('personaFilter').value;
+      const search = document.getElementById('searchInput').value.toLowerCase();
+
+      filteredRecords = allRecords.filter(r => {
+        if (persona !== 'All' && r.persona !== persona) return false;
+        if (search) {
+          const haystack = `${r.key} ${r.persona} ${r.workflow_id} ${r.task} ${r.result}`.toLowerCase();
+          if (!haystack.includes(search)) return false;
+        }
+        return true;
+      });
+
+      sortAndRender(false);
+
+      if (filteredRecords.length > 0) {
+        const keepSelected = filteredRecords.find(r => r.key === selectedKey);
+        selectRecord((keepSelected || filteredRecords[0]).key);
+      } else {
+        selectedKey = '';
+        renderDetails(null);
+      }
+    }
+
+    function sort(column) {
+      if (sortColumn === column) {
+        sortAsc = !sortAsc;
+      } else {
+        sortColumn = column;
+        sortAsc = column === 'created_on' ? false : true;
+      }
+
+      sortAndRender(true);
+    }
+
+    function sortAndRender(preserveSelection) {
+      filteredRecords.sort((a, b) => {
+        if (sortColumn === 'created_on') {
+          const aRaw = String(a.created_on || NULL_PLACEHOLDER);
+          const bRaw = String(b.created_on || NULL_PLACEHOLDER);
+          const aIsNull = aRaw === NULL_PLACEHOLDER;
+          const bIsNull = bRaw === NULL_PLACEHOLDER;
+
+          if (aIsNull || bIsNull) {
+            if (aIsNull && bIsNull) return 0;
+            return sortAsc ? (aIsNull ? 1 : -1) : (aIsNull ? -1 : 1);
+          }
+
+          const aTime = Date.parse(aRaw);
+          const bTime = Date.parse(bRaw);
+          if (!Number.isNaN(aTime) && !Number.isNaN(bTime)) {
+            return sortAsc ? aTime - bTime : bTime - aTime;
+          }
+
+          const cmp = aRaw.localeCompare(bRaw);
+          return sortAsc ? cmp : -cmp;
+        }
+
+        const aVal = String(a[sortColumn] || '');
+        const bVal = String(b[sortColumn] || '');
+        const cmp = aVal.localeCompare(bVal);
+        return sortAsc ? cmp : -cmp;
+      });
+
+      renderTable();
+
+      if (preserveSelection && selectedKey) {
+        const selectedRecord = filteredRecords.find(r => r.key === selectedKey);
+        if (!selectedRecord && filteredRecords.length > 0) {
+          selectedKey = filteredRecords[0].key;
+        }
+      }
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById('tableBody');
+      document.getElementById('filteredCount').textContent = filteredRecords.length;
+      document.getElementById('totalCount').textContent = allRecords.length;
+
+      if (filteredRecords.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px;">No records found</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = filteredRecords.map(r => `
+        <tr class="${r.key === selectedKey ? 'selected-row' : ''}" onclick="selectRecord('${escapeJs(r.key)}')">
+          <td><span class="truncate">${escapeHtml(r.key)}</span></td>
+          <td>${escapeHtml(r.persona)}</td>
+          <td><span class="truncate">${escapeHtml(r.workflow_id)}</span></td>
+          <td>${escapeHtml(r.created_on || NULL_PLACEHOLDER)}</td>
+          <td><span class="truncate">${escapeHtml(r.task.substring(0, 180))}</span></td>
+          <td><span class="truncate">${escapeHtml(r.result.substring(0, 220))}</span></td>
+        </tr>
+      `).join('');
+    }
+
+    function selectRecord(key) {
+      selectedKey = key;
+      renderTable();
+      const record = filteredRecords.find(r => r.key === key) || allRecords.find(r => r.key === key);
+      renderDetails(record || null);
+    }
+
+    function renderDetails(record) {
+      const detailsContent = document.getElementById('detailsContent');
+      const subtitle = document.getElementById('detailsSubtitle');
+
+      if (!record) {
+        subtitle.textContent = 'Select a workflow record to inspect the full payload.';
+        detailsContent.className = 'details-empty';
+        detailsContent.innerHTML = 'No workflow selected.';
+        return;
+      }
+
+      subtitle.textContent = `${record.persona || '-'} / ${record.workflow_id || '-'}`;
+      detailsContent.className = 'details-grid';
+      detailsContent.innerHTML = `
+        <div class="detail-card">
+          <h3 onclick="toggleCard(this)"><span class="arrow">▼</span>Summary</h3>
+          <div class="detail-card-content">
+            <div class="detail-item"><span class="detail-label">Key</span><div class="detail-value">${escapeHtml(record.key || '-')}</div></div>
+            <div class="detail-item"><span class="detail-label">Persona</span><div class="detail-value">${escapeHtml(record.persona || '-')}</div></div>
+            <div class="detail-item"><span class="detail-label">Workflow ID</span><div class="detail-value">${escapeHtml(record.workflow_id || '-')}</div></div>
+            <div class="detail-item"><span class="detail-label">Timestamp</span><div class="detail-value">${escapeHtml(record.created_on || NULL_PLACEHOLDER)}</div></div>
+          </div>
+        </div>
+        <div class="detail-card">
+          <h3 onclick="toggleCard(this)"><span class="arrow collapsed">▼</span>Task</h3>
+          <div class="detail-card-content collapsed">
+            <div class="markdown-content">${renderMarkdown(record.task || '-')}</div>
+          </div>
+        </div>
+        <div class="detail-card">
+          <h3 onclick="toggleCard(this)"><span class="arrow collapsed">▼</span>Result</h3>
+          <div class="detail-card-content collapsed">
+            <div class="markdown-content">${renderMarkdown(record.result || '-')}</div>
+          </div>
+        </div>
+        <div class="detail-card">
+          <h3 onclick="toggleCard(this)"><span class="arrow collapsed">▼</span>Metadata</h3>
+          <div class="detail-card-content collapsed">
+            <div class="json-block">${escapeHtml(JSON.stringify(record.metadata || {}, null, 2))}</div>
+          </div>
+        </div>
+        <div class="detail-card">
+          <h3 onclick="toggleCard(this)"><span class="arrow collapsed">▼</span>Stats</h3>
+          <div class="detail-card-content collapsed">
+            <div class="json-block">${escapeHtml(JSON.stringify(record.stats || {}, null, 2))}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function toggleCard(header) {
+      const content = header.nextElementSibling;
+      const arrow = header.querySelector('.arrow');
+      content.classList.toggle('collapsed');
+      arrow.classList.toggle('collapsed');
+    }
+
+    function escapeHtml(text) {
+      const map = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'};
+      return String(text).replace(/[&<>"']/g, m => map[m]);
+    }
+
+    function escapeJs(text) {
+      return String(text).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    }
+
+    function renderMarkdown(text) {
+      if (!text) return '';
+      try {
+        return marked.parse(String(text));
+      } catch (e) {
+        console.error('Markdown parse error:', e);
+        return escapeHtml(text);
+      }
+    }
+
+    // Request initial data from extension
+    vscode.postMessage({ command: 'init' });
+  </script>
+</body>
+</html>

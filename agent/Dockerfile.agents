@@ -23,20 +23,6 @@ RUN helm version
 RUN kubectl version --client
 
 
-
-COPY ./common-requirements.txt ./requirements.txt
-
-RUN pip install --upgrade pip setuptools wheel && \
-    pip install -r requirements.txt && \
-    rm -rf ./requirements.txt
-
-FROM build-stage AS production-stage
-WORKDIR /app
-COPY ./entrypoint.sh ./
-COPY ./qwen-ops-agent.py ./qwen-ops-agent.py
-COPY --from=templates ./ ./templates
-COPY --from=actions ./ ./actions
-
 # GCLOUD Support
 RUN apt-get update && apt-get install -y \
     apt-transport-https \
@@ -52,6 +38,25 @@ RUN echo "deb https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /et
 
 RUN apt-get update \
     && apt-get install -y google-cloud-cli google-cloud-cli-gke-gcloud-auth-plugin
+
+
+COPY ./common-requirements.txt ./requirements.txt
+
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install -r requirements.txt && \
+    rm -rf ./requirements.txt
+
+
+RUN pip install markdown2
+
+FROM build-stage AS production-stage
+WORKDIR /app
+COPY ./entrypoint.sh ./
+COPY ./qwen-ops-agent.py ./qwen-ops-agent.py
+COPY --from=templates ./ ./templates
+COPY --from=actions ./ ./actions
+COPY --from=notifications ./ ./notifications
+COPY --from=../management ./ /management
 
 # Install needed mcp servers
 

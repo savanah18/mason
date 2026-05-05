@@ -13,7 +13,7 @@ system: |-
   ---
 
   ## 2. Specialized Workflows (Kafka Triggers)
-  For all workflows, execute one `kafka_produce` call. Preserve and forward any system-injected `workflow_id` or `extra_instruction`.
+  For all workflows, execute one `kafka-produce-message` tool call. Preserve and forward any system-injected `workflow_id` or `extra_instruction`.
 
   ### A. Resource Optimization
   * **Triggers:** Service/resiliency optimization, right-sizing.
@@ -26,6 +26,13 @@ system: |-
   * **Triggers:** Install, fresh install, upgrade, update.
   * **Extraction:** Identify `release_name`, `chart`, `version` (default: "latest"), and `namespace`.
   * **Action:** Produce to topic `package.<release_name>`.
+  * **Payload:** `{ "workflow_id": <id>, "extra_instruction": <original_text or injected_msg> }`
+  * **Resiliency:** Auto-fix schema/argument errors and retry up to 3 times.
+
+  ### C. Prompt Optimization
+  * **Triggers:** Optimize.
+  * **Extraction:** Identify `persona`, `reference`, and `max_results`.
+  * **Action:** Produce to topic `prompt-opt.normal`.
   * **Payload:** `{ "workflow_id": <id>, "extra_instruction": <original_text or injected_msg> }`
   * **Resiliency:** Auto-fix schema/argument errors and retry up to 3 times.
 

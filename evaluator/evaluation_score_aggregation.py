@@ -129,43 +129,55 @@ def get_batch_files(args: argparse.Namespace) -> list[Path]:
 
 def extract_evaluation_payload(record: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
     """Extract evaluation payload and workflow key from record."""
-    response = record.get("response")
-    if not isinstance(response, dict):
-        return None, None
-
-    candidates = response.get("candidates")
-    if not isinstance(candidates, list) or not candidates:
-        return None, None
-
-    first_candidate = candidates[0]
-    if not isinstance(first_candidate, dict):
-        return None, None
-
-    content = first_candidate.get("content")
-    if not isinstance(content, dict):
-        return None, None
-
-    parts = content.get("parts")
-    if not isinstance(parts, list):
-        return None, None
-
-    payload = None
-    for part in parts:
-        if not isinstance(part, dict):
-            continue
-        text_value = part.get("text")
+    def parse_payload_text(text_value: Any) -> dict[str, Any] | None:
         if not isinstance(text_value, str):
-            continue
+            return None
         try:
-            test_payload = json.loads(text_value)
+            parsed = json.loads(text_value)
         except json.JSONDecodeError:
-            continue
-        if isinstance(test_payload, dict):
-            payload = test_payload
-            break
+            return None
+        if isinstance(parsed, dict):
+            return parsed
+        return None
 
-    workflow_key = record.get("key")
-    return payload, workflow_key
+    # Gemini format: response.candidates[0].content.parts[].text
+    response = record.get("response")
+    if isinstance(response, dict):
+        candidates = response.get("candidates")
+        if isinstance(candidates, list) and candidates:
+            first_candidate = candidates[0]
+            if isinstance(first_candidate, dict):
+                content = first_candidate.get("content")
+                if isinstance(content, dict):
+                    parts = content.get("parts")
+                    if isinstance(parts, list):
+                        for part in parts:
+                            if not isinstance(part, dict):
+                                continue
+                            payload = parse_payload_text(part.get("text"))
+                            if payload is not None:
+                                return payload, record.get("key")
+
+    # OpenAI batch format: response.body.output[-1].content[].text
+    if isinstance(response, dict):
+        body = response.get("body")
+        if isinstance(body, dict):
+            output_items = body.get("output")
+            if isinstance(output_items, list):
+                for output_item in reversed(output_items):
+                    if not isinstance(output_item, dict):
+                        continue
+                    content_items = output_item.get("content")
+                    if not isinstance(content_items, list):
+                        continue
+                    for content_item in content_items:
+                        if not isinstance(content_item, dict):
+                            continue
+                        payload = parse_payload_text(content_item.get("text"))
+                        if payload is not None:
+                            return payload, record.get("custom_id") or record.get("key")
+
+    return None, None
 
 
 def summarize_batch(

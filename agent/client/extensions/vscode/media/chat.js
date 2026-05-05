@@ -2,9 +2,11 @@ const vscode = acquireVsCodeApi();
 const msgs = document.getElementById('messages');
 const input = document.getElementById('input');
 const status = document.getElementById('status');
+const session = document.getElementById('session');
 const send = document.getElementById('send');
 const clear = document.getElementById('clear');
 const refresh = document.getElementById('refresh');
+const sessions = document.getElementById('sessions');
 
 function escapeHtml(text) {
   return String(text)
@@ -42,10 +44,15 @@ window.addEventListener('message', event => {
     const data = event && event.data ? event.data : {};
     const messages = Array.isArray(data.messages) ? data.messages : [];
     const statusText = typeof data.status === 'string' ? data.status : '';
+    const sessionLabel = typeof data.sessionLabel === 'string' ? data.sessionLabel : '';
     const isLoading = Boolean(data.isLoading);
 
     if (statusText) {
       status.textContent = statusText;
+    }
+
+    if (session && sessionLabel) {
+      session.textContent = sessionLabel;
     }
 
     send.disabled = isLoading;
@@ -109,3 +116,9 @@ clear.addEventListener('click', () => {
 refresh.addEventListener('click', () => {
   vscode.postMessage({ action: 'refresh-health' });
 });
+
+if (sessions) {
+  sessions.addEventListener('click', () => {
+    vscode.postMessage({ action: 'open-sessions' });
+  });
+}

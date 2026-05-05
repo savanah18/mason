@@ -9,6 +9,7 @@ Then appends entries into a hash field for:
   workflow:dev:persona:<key>
 
 By default, entries are appended to hash field "evaluations" as a JSON array.
+The extractor also accepts OpenAI batch output records.
 """
 
 from __future__ import annotations
@@ -95,8 +96,81 @@ def resolve_batch_dir(args: argparse.Namespace) -> Path:
     return Path(__file__).resolve().parent / "batch_results" / args.persona / "e2e"
 
 
+def extract_text_from_gemini_response(response: dict[str, Any]) -> str | None:
+    candidates = response.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        return None
+
+    first_candidate = candidates[0]
+    if not isinstance(first_candidate, dict):
+        return None
+
+    content = first_candidate.get("content")
+    if not isinstance(content, dict):
+        return None
+
+    parts = content.get("parts")
+    if not isinstance(parts, list) or not parts:
+        return None
+
+    first_part = parts[0]
+    if not isinstance(first_part, dict):
+        return None
+
+    text = first_part.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return None
+
+    return text
+
+
+def extract_text_from_openai_response(response: dict[str, Any]) -> str | None:
+    body_candidates: list[Any] = [response.get("body")]
+
+    nested_response = response.get("response")
+    if isinstance(nested_response, dict):
+        body_candidates.append(nested_response.get("body"))
+
+    for body in body_candidates:
+        if not isinstance(body, dict):
+            continue
+
+        choices = body.get("choices")
+        if isinstance(choices, list) and choices:
+            first_choice = choices[0]
+            if isinstance(first_choice, dict):
+                message = first_choice.get("message")
+                if isinstance(message, dict):
+                    content = message.get("content")
+                    if isinstance(content, str) and content.strip():
+                        return content
+
+        output = body.get("output")
+        if isinstance(output, list):
+            for output_item in output:
+                if not isinstance(output_item, dict):
+                    continue
+                content = output_item.get("content")
+                if not isinstance(content, list):
+                    continue
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+                    text = part.get("text")
+                    if isinstance(text, str) and text.strip():
+                        return text
+
+        output_text = body.get("output_text")
+        if isinstance(output_text, str) and output_text.strip():
+            return output_text
+
+    return None
+
+
 def extract_record_data(record: dict[str, Any]) -> tuple[str | None, str | None]:
     key = record.get("key")
+    if not isinstance(key, str) or not key.strip():
+        key = record.get("custom_id")
     if not isinstance(key, str) or not key.strip():
         return None, None
 
@@ -104,28 +178,11 @@ def extract_record_data(record: dict[str, Any]) -> tuple[str | None, str | None]
     if not isinstance(response, dict):
         return None, None
 
-    candidates = response.get("candidates")
-    if not isinstance(candidates, list) or not candidates:
-        return None, None
+    text = extract_text_from_gemini_response(response)
+    if text is None:
+        text = extract_text_from_openai_response(response)
 
-    first_candidate = candidates[0]
-    if not isinstance(first_candidate, dict):
-        return None, None
-
-    content = first_candidate.get("content")
-    if not isinstance(content, dict):
-        return None, None
-
-    parts = content.get("parts")
-    if not isinstance(parts, list) or not parts:
-        return None, None
-
-    first_part = parts[0]
-    if not isinstance(first_part, dict):
-        return None, None
-
-    text = first_part.get("text")
-    if not isinstance(text, str) or not text.strip():
+    if text is None:
         return None, None
 
     return key, text

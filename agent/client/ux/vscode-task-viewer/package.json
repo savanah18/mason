@@ -1,0 +1,86 @@
+{
+  "name": "newbie-task-viewer",
+  "displayName": "Newbie Task Viewer",
+  "description": "VS Code task viewer for Redis-backed workflow, system prompt, and prompt optimization records.",
+  "version": "0.1.0",
+  "publisher": "your-publisher",
+  "engines": {
+    "vscode": "^1.87.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onCommand:newbieTaskViewer.openDashboard",
+    "onCommand:newbieTaskViewer.openWorkflows",
+    "onCommand:newbieTaskViewer.openSystemPrompts",
+    "onCommand:newbieTaskViewer.openPromptOptimization",
+    "onCommand:newbieTaskViewer.openAgentManagement"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "newbieTaskViewer.openDashboard",
+        "title": "Task Viewer: Open Dashboard"
+      },
+      {
+        "command": "newbieTaskViewer.openWorkflows",
+        "title": "Task Viewer: Open Workflows"
+      },
+      {
+        "command": "newbieTaskViewer.openSystemPrompts",
+        "title": "Task Viewer: Open System Prompts"
+      },
+      {
+        "command": "newbieTaskViewer.openPromptOptimization",
+        "title": "Task Viewer: Open Prompt Optimization"
+      },
+      {
+        "command": "newbieTaskViewer.openAgentManagement",
+        "title": "Task Viewer: Open Agent Management"
+      }
+    ],
+    "configuration": {
+      "title": "Task Viewer",
+      "properties": {
+        "taskViewer.redis.host": {
+          "type": "string",
+          "default": "localhost",
+          "description": "Redis host used by the task viewer."
+        },
+        "taskViewer.redis.port": {
+          "type": "number",
+          "default": 6379,
+          "description": "Redis port used by the task viewer."
+        },
+        "taskViewer.redis.password": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Redis password."
+        },
+        "taskViewer.redis.database": {
+          "type": "number",
+          "default": 0,
+          "description": "Redis database index used by the task viewer."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "echo 'No lint configured'",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.87.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "redis": "^4.7.0",
+    "yaml": "^2.8.0"
+  }
+}
