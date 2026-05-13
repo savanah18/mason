@@ -86,7 +86,10 @@
       <div class="header">
         <div class="header-top">
           <h1>Prompt Optimization Candidates</h1>
-          <button id="mainFilterToggleButton" class="filter-toggle-button" type="button" onclick="toggleFilterSection()">Hide Filters</button>
+          <div style="display: flex; gap: 8px;">
+            <button id="refreshButton" class="filter-toggle-button" type="button" onclick="refreshData()">🔄 Refresh</button>
+            <button id="mainFilterToggleButton" class="filter-toggle-button" type="button" onclick="toggleFilterSection()">Hide Filters</button>
+          </div>
         </div>
         <div class="info-row">Showing <strong id="filteredCount">0</strong> of <strong id="totalCount">0</strong> prompt optimization records</div>
       </div>
@@ -574,6 +577,17 @@
         console.error('Markdown parse error:', e);
         return escapeHtml(text);
       }
+    }
+
+    function refreshData() {
+      const button = document.getElementById('refreshButton');
+      button.disabled = true;
+      button.textContent = '⏳ Loading...';
+      vscode.postMessage({ command: 'refresh' });
+      setTimeout(() => {
+        button.disabled = false;
+        button.textContent = '🔄 Refresh';
+      }, 1000);
     }
 
     vscode.postMessage({ command: 'init' });

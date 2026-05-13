@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -16,6 +17,11 @@ def spawn_agent_container(
 ) -> dict[str, str | int | bool]:
     script_path = project_root / "management" / "backend" / "scripts" / "spawn_agent.sh"
 
+    # Explicitly build environment with INFERENCE_SERVER_TYPE
+    env = dict(os.environ)
+    inference_server_type = os.getenv("INFERENCE_SERVER_TYPE", "tensorrt-llm")
+    env["INFERENCE_SERVER_TYPE"] = inference_server_type
+
     proc = subprocess.run(
         [
             str(script_path),
@@ -27,6 +33,7 @@ def spawn_agent_container(
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
 
     return {

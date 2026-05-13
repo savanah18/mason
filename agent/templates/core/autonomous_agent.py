@@ -1,11 +1,18 @@
 import time
 import yaml
 from typing import List, Any
+import os
 
 from .sensor import Sensor, KafkaEventListener
 from templates.config.goals import GoalConfig, Goal
 from templates.config.kafka import KafkaEventListenerConfig
 from ..config.goals import Goal
+
+# Agent LIfecyle Management
+from .agent_registry import AgentRegistry
+registry = AgentRegistry()
+
+PERSONA = os.getenv("PERSONA","deployer")
 
 class AutonomousAgent:
     def __init__(self, 
@@ -42,7 +49,13 @@ class AutonomousAgent:
     async def launch(self):
         while(not self.is_terminated):
             percepts =  [next(percept) for percept in self.perceive()] 
-            await self.reason(percepts)
+            try:
+                registry.set_agent_status(PERSONA, "running")
+                await self.reason(percepts)
+                registry.set_agent_status(PERSONA, "waiting for tasks")
+            except Exception as e:
+                registry.set_agent_status(PERSONA, "exception occurred")
+                print(f"Error during reasoning: {e}")
 
     def _initialize_sensors(self, config_path) -> List[Sensor]:
         with open(config_path, "r") as f: 

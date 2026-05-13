@@ -162,9 +162,11 @@ services:
         actions: ./agent/actions
         memory: ./agent/memory
         notifications: ./agent/notifications
-        management: ../management
+        management: ./management
     image: agent-generic:latest
     container_name: agent-manager
+    secrets: 
+    - oci-registry 
     volumes:
     - ./agent/personas:/app/personas:rw
     - ./agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw # for dev purposes only
@@ -172,11 +174,13 @@ services:
     - ./agent/actions/:/app/actions:rw
     - ./agent/memory/:/app/memory:rw
     - ./agent/notifications/:/app/notifications:rw
+    - ./management:/management:rw
     - /var/run/docker.sock:/var/run/docker.sock
-    command: >
-      cd /mananagement && uvicorn backend.app:app --host 0.0.0.0 --port 8010
+    working_dir: /management
+    command: > 
+      uvicorn backend.app:app --host 0.0.0.0 --port 8010
     ports:
-      - "8002:8002"
+      - "8010:8010"
     networks:
       - triton-ai-network
 
@@ -185,6 +189,7 @@ services:
   # Agents
   deployer-agent:
     profiles: ["agent", "standard"]
+    image: agent-generic:latest
     container_name: deployer-agent
     secrets: 
     - oci-registry 
@@ -281,6 +286,7 @@ services:
       target: /mnt/checkpoint
       type: bind
     - /root/.config/gcloud:/root/.config/gcloud:rw # for GKE auth, if needed
+    - /var/run/docker.sock:/var/run/docker.sock
     command: >
       python -u qwen-chat-agent.py 
     ports:

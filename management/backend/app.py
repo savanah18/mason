@@ -16,7 +16,7 @@ from .persona_writer import write_persona_configs
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 
 app = FastAPI(title="Agent Lifecycle Orchestrator", version="0.1.0")
@@ -86,7 +86,7 @@ def instantiate_agent(persona: str, request: InstantiateAgentRequest) -> dict:
 
     # update registry status to running
     try:
-        registry.set_agent_status(persona, "running")
+        registry.set_agent_status(persona, "waiting for tasks")
     except Exception:
         pass
 
@@ -169,7 +169,7 @@ def restart_agent(persona: str) -> dict:
         if not runtime_result["success"]:
             raise HTTPException(status_code=status_code, detail=runtime_result)
         try:
-            registry.set_agent_status(persona, "running")
+            registry.set_agent_status(persona, "waiting for tasks")
         except Exception:
             pass
         return {

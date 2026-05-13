@@ -47,7 +47,10 @@
       <div class="header">
         <div class="header-top">
           <h1>Workflow</h1>
-          <button id="mainFilterToggleButton" class="filter-toggle-button" type="button" onclick="toggleFilterSection()">Hide Filters</button>
+          <div style="display: flex; gap: 8px;">
+            <button id="refreshButton" class="filter-toggle-button" type="button" onclick="refreshData()">🔄 Refresh</button>
+            <button id="mainFilterToggleButton" class="filter-toggle-button" type="button" onclick="toggleFilterSection()">Hide Filters</button>
+          </div>
         </div>
         <div class="info-row">Showing <strong id="filteredCount">0</strong> of <strong id="totalCount">0</strong> workflow records</div>
       </div>
@@ -152,6 +155,9 @@
       const search = document.getElementById('searchInput').value.toLowerCase();
 
       filteredRecords = allRecords.filter(r => {
+        // Filter out records with null or missing created_at
+        if (!r.created_on || r.created_on === NULL_PLACEHOLDER) return false;
+        
         if (persona !== 'All' && r.persona !== persona) return false;
         if (search) {
           const haystack = `${r.key} ${r.persona} ${r.workflow_id} ${r.task} ${r.result}`.toLowerCase();
@@ -324,6 +330,17 @@
         console.error('Markdown parse error:', e);
         return escapeHtml(text);
       }
+    }
+
+    function refreshData() {
+      const button = document.getElementById('refreshButton');
+      button.disabled = true;
+      button.textContent = '⏳ Loading...';
+      vscode.postMessage({ command: 'refresh' });
+      setTimeout(() => {
+        button.disabled = false;
+        button.textContent = '🔄 Refresh';
+      }, 1000);
     }
 
     // Request initial data from extension

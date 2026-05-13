@@ -23,6 +23,8 @@ if [[ "$FORCE_RECREATE" == "true" ]] && docker ps -a --format '{{.Names}}' | gre
   docker rm -f "$CONTAINER_NAME" >/dev/null
 fi
 
+echo "Inference Server Type: ${INFERENCE_SERVER_TYPE:-tensorrt-llm}"
+
 cmd=(
   docker run -d
   --name "$CONTAINER_NAME"

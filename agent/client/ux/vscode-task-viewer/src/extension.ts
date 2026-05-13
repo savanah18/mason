@@ -199,7 +199,7 @@ class WorkflowPanel {
     });
 
     this.panel.webview.onDidReceiveMessage(async (message) => {
-      if (message.command === 'init') {
+      if (message.command === 'init' || message.command === 'refresh') {
         await this.loadAndSendData();
       }
     });
@@ -296,7 +296,7 @@ class SystemPromptsPanel {
     });
 
     this.panel.webview.onDidReceiveMessage(async (message) => {
-      if (message.command === 'init') {
+      if (message.command === 'init' || message.command === 'refresh') {
         await this.loadAndSendData();
       }
     });
@@ -390,7 +390,7 @@ class PromptOptimizationPanel {
     });
 
     this.panel.webview.onDidReceiveMessage(async (message) => {
-      if (message.command === 'init') {
+      if (message.command === 'init' || message.command === 'refresh') {
         await this.loadAndSendData();
       } else if (message.command === 'savePrompt') {
         await this.savePrompt(message.key, message.updatedPrompt);
@@ -567,17 +567,80 @@ class PromptOptimizationPanel {
     try {
       const client = getRedisClient();
       const writeTime = new Date().toISOString();
+      const compactTime = this.formatDateTimeCompact(new Date());
+      
+      // Parse persona from the optimization candidate key
+      const { persona } = this.parseCandidateKey(key);
+      if (!persona) {
+        throw new Error(`Unable to parse persona from key: ${key}`);
+      }
+
+      // Update the candidate record itself
       await client.hSet(key, {
         updated_prompt: updatedPrompt,
         updated_at: writeTime,
         updated_by: 'task-viewer-manual-edit',
       });
-      vscode.window.showInformationMessage(`✓ Prompt saved to Redis: ${key.substring(0, 50)}...`);
+
+      // Get current latest system prompt for this persona
+      const systemLatestKey = `system-prompts:${persona}:latest`;
+      const currentLatest = await client.hGetAll(systemLatestKey);
+      const currentLatestPrompt = currentLatest.prompt || '';
+      
+      // Check if edited prompt differs from latest
+      const hasChanged = currentLatestPrompt !== updatedPrompt;
+
+      if (hasChanged) {
+        // Save current latest to history before updating
+        if (currentLatestPrompt) {
+          // Create a timestamp-based historical record if latest exists
+          const currentUpdatedAt = currentLatest.updated_at || writeTime;
+          const lastModifiedDate = new Date(currentUpdatedAt);
+          const historyCompactTime = this.formatDateTimeCompact(lastModifiedDate);
+          const systemHistoryKey = `system-prompts:${persona}:${historyCompactTime}`;
+          
+          // Only save if this exact timestamp doesn't exist yet
+          const existingHistory = await client.hGetAll(systemHistoryKey);
+          if (!existingHistory || Object.keys(existingHistory).length === 0) {
+            await client.hSet(systemHistoryKey, {
+              prompt: currentLatestPrompt,
+              metadata: currentLatest.metadata || JSON.stringify({ persona, created_at: currentUpdatedAt }),
+              remarks: currentLatest.remarks || '',
+              feedback: currentLatest.feedback || '',
+            });
+          }
+        }
+
+        // Update latest with the new prompt
+        const systemData = {
+          prompt: updatedPrompt,
+          metadata: JSON.stringify({
+            persona,
+            created_at: writeTime,
+          }),
+          remarks: JSON.stringify({
+            created_by: 'task-viewer-manual-edit',
+            updated_from: key,
+          }),
+          feedback: currentLatest.feedback || '',
+        };
+
+        await client.hSet(systemLatestKey, systemData);
+
+        // Also save the new version to history
+        const newHistoryKey = `system-prompts:${persona}:${compactTime}`;
+        await client.hSet(newHistoryKey, systemData);
+
+        vscode.window.showInformationMessage(`✓ Prompt changes saved to history: ${newHistoryKey}`);
+      } else {
+        vscode.window.showInformationMessage(`✓ Prompt saved (no changes detected)`);
+      }
+
       this.panel.webview.postMessage({
         type: 'actionResult',
         action: 'save',
         success: true,
-        message: `Saved candidate prompt: ${key}`,
+        message: hasChanged ? `Saved candidate and historized to ${newHistoryKey}` : `Prompt saved (no changes)`,
       });
       await this.loadAndSendData();
     } catch (error) {

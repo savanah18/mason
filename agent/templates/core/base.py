@@ -16,7 +16,6 @@ class BaseAgent:
         try:
             with open(config_path, "r") as f: 
                 llm_cfg = yaml.safe_load(f)
-                # llm_cfg["generate_cfg"]["temperature"] = 0.1 if os.getenv("AGENT_MODE","dev") == "eval" else llm_cfg["generate_cfg"].get("temperature", 0.8)
         except Exception as e:
             llm_cfg = {
                 'model': 'Qwen3-4B-Instruct',
