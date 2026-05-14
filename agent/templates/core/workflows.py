@@ -7,7 +7,7 @@ from datetime import datetime
 
 import redis
 
-from ..mixins.json import FromJsonMixin
+from .mixins.json import FromJsonMixin
 
 @dataclass
 class WorkflowExecution():

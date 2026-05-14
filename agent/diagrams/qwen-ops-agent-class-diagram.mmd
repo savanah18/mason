@@ -1,0 +1,84 @@
+%% Qwen Ops Agent - Class/Entity Diagram (Mermaid)
+%% Generated: 2026-05-14
+classDiagram
+
+    %% Core Agent Class
+    class QwenOpsAgent {
+        +PersonaConfig persona_config
+        +str persona
+        +MemoryAPIClient memory_client
+        +dict system_prompt_status
+        +int tools_count
+        +bool email_notification_enabled
+        +reason(percepts, workflow_id)
+        +_execute_reasoning_turn(messages)
+        +_record_workflow_execution(prompt, session_id, workflow_id, session, run_result, workflow_start_time)
+        +compute_prompt_token_length(messages, lang)
+        +_apply_mcp_ping_compat_patch()
+    }
+
+    %% Inherited base classes / mixins
+    class BaseAgent
+    class AutonomousAgent
+    class Assistant
+    class MemoryManagementMixin
+
+    QwenOpsAgent --|> BaseAgent : inherits
+    QwenOpsAgent --|> AutonomousAgent : inherits
+    QwenOpsAgent --|> Assistant : inherits
+    QwenOpsAgent --|> MemoryManagementMixin : mixin
+
+    %% Memory subsystem
+    class MemorySessionStore
+    class MemoryAPIClient
+    class WorkingMemory
+    class MemoryMessage
+
+    MemorySessionStore o-- MemoryAPIClient : contains
+    MemorySessionStore o-- WorkingMemory : manages
+    MemoryAPIClient "1" <.. "*" WorkingMemory : reads/writes
+    QwenOpsAgent --> MemoryAPIClient : memory_client
+    QwenOpsAgent --> WorkingMemory : session (runtime)
+    QwenOpsAgent --> MemoryMessage : appends final messages
+
+    %% Prompt / config / goals
+    class PromptUpdater
+    class PersonaConfig
+    class Goal
+
+    QwenOpsAgent --> PromptUpdater : resolves system prompt
+    QwenOpsAgent --> PersonaConfig : constructed from resolver
+    QwenOpsAgent --> Goal : persona_config.goal
+
+    %% MCP / Tools / Actuators
+    class MCPManager
+    class ActionTools
+    class HelmTools
+    class KubernetesTools
+    class KafkaTools
+    class ResourceCollectorTool
+    class PromptOptimizationTool
+
+    BaseAgent --> MCPManager : _load_mcp_tools()
+    QwenOpsAgent --> ActionTools : actuators (built from config)
+    ActionTools <|-- HelmTools
+    ActionTools <|-- KubernetesTools
+    ActionTools <|-- KafkaTools
+    ActionTools <|-- ResourceCollectorTool
+    ActionTools <|-- PromptOptimizationTool
+
+    note for ActionTools "Examples imported in qwen-ops-agent.py:\nHelmInstall, HelmUpgrade, HelmRollback, HelmUninstall,\nKubernetesListWorkloads, KubernetesApplyResourceUpdate,\nKafkaProduceMessage, ResourceCollector, PromptOptimizationRetrieveWorkflows"
+
+    %% Utilities and helpers
+    class QwenTokenizer
+    class Utils
+    class OutputBeautify
+    class Workflows
+
+    QwenOpsAgent --> QwenTokenizer : qwen_tokenizer (token counting)
+    QwenOpsAgent --> Utils : extract_text_from_message()
+    QwenOpsAgent --> OutputBeautify : typewriter_print()
+    QwenOpsAgent --> Workflows : process_workflow_execution()
+    BaseAgent --> Utils : apply_mcp_ping_compat_patch()
+
+    note right of QwenOpsAgent "High-level responsibilities:\n- Build prompts and system context\n- Manage memory sessions\n- Run LLM reasoning loop (Assistant.run)\n- Execute actuator tools (function calls / MCP tools)\n- Record workflow metrics and history"

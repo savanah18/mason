@@ -29,18 +29,14 @@ from qwen_agent.utils.output_beautify import typewriter_print
 
 from templates.core.autonomous_agent import AutonomousAgent
 from templates.core.base import BaseAgent, parse_think_tags_from_responses
-from templates.core.sensor import Sensor, KafkaEventListener
-from templates.mixins.json import FromJsonMixin
-from templates.config.goals import GoalConfig, Goal
-from templates.config.kafka import KafkaEventListenerConfig
-from templates.core.context_compaction import (
-    compact_assistant_chunk_text,
-    inject_execution_id_context,
-    prune_session_history,
-    select_context_messages,
-)
-from templates.core.prompt_manager import PromptUpdater
-from templates.core.mcp_compat import apply_mcp_ping_compat_patch
+from templates.core.config.config import PersonaConfig
+from templates.core.config.resolver import ConfigResolver
+from templates.core.sensor import Sensor, KafkaEventListener, build_sensors_from_config
+from templates.core.mixins.json import FromJsonMixin
+from templates.core.config.goals import GoalConfig, Goal
+from templates.core.config.kafka import KafkaEventListenerConfig
+from templates.core.prompts.prompt_manager import PromptUpdater
+from templates.core.utils import apply_mcp_ping_compat_patch
 from templates.core.workflows import (
     process_workflow_execution,
     sanitize_faux_tool_transcript
@@ -89,6 +85,8 @@ from actions.tools.prompt_optimization.tools import (
     PromptOptimizationRetrieveWorkflows
 )
 
+from templates.core.actuator import build_actuators_from_config
+
 
 def _load_prompt_optimization_tools():
     """Load prompt optimization tools from a hyphenated path via importlib."""
@@ -107,114 +105,79 @@ def _load_prompt_optimization_tools():
 _load_prompt_optimization_tools()
 
 
-class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryManagementMixin):
-    # Redis client and section payload loader moved to `templates.core.base.BaseAgent`.
-
-    @staticmethod
-    def _initialize_sensors_from_payload(payload: dict[str, Any]) -> List[Sensor]:
-        sensors: List[Sensor] = []
-        for sensor in payload.get("spec", []):
-            sensor_cls = globals().get(sensor.get("type"))
-            config_cls = globals().get(sensor.get("config_type"))
-            if sensor_cls is None or config_cls is None:
-                raise ValueError(f"Unsupported sensor definition: {sensor}")
-            sensors.append(sensor_cls(config=config_cls.from_json(sensor)))
-        return sensors
-
-    @staticmethod
-    def _initialize_mcp_cfg_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
-        return payload.get("spec", {}) if isinstance(payload, dict) else {}
-
-    def __init__(
-        self,
-        goal: Union[Goal, Path, str],
-        sensors: Union[List[Sensor], Path, str],
-        actuators: Union[List[Any], Path, str],
-        llm_cfg: Union[Dict, Path, str],
-        prune_intermediate_task_contexts=False
-    ):
-        """Initialize Qwen chat agent with MCP tools."""
+class QwenOpsAgent(BaseAgent, AutonomousAgent, Assistant, MemoryManagementMixin):
+    def __init__(self, persona_config: PersonaConfig):
+        """Initialize Qwen Ops Agent from resolved persona configuration."""
         print("🔧 Initializing Qwen Ops Agent...")
 
-        # brain and reasoning
-        if isinstance(llm_cfg, str) or isinstance(llm_cfg, Path):
-            llm_cfg: Dict = self._initialize_llm_cfg(llm_cfg)
+        self.persona_config = persona_config
+        self.persona = persona_config.persona or PERSONA
 
-        # goals
-        if isinstance(goal, str) or isinstance(goal, Path):
-            goal: Goal = self._initialize_goal(goal)
+        # LLM Configuration
+        llm_cfg = persona_config.llm_cfg
 
+        # Goals and System Prompts
         prompt_updater = PromptUpdater()
+        self.system_prompt_status = prompt_updater.resolve_system_prompt(self.persona)
+        self._resolved_system_prompt = self.system_prompt_status.get("prompt") or f"{persona_config.goal.description}"
 
-        # Prefer prompt from Redis; only read/write YAML when Redis has no latest
-        try:
-            redis_prompt, remarks, feedback = prompt_updater.get_latest_system_prompt(PERSONA)
-        except Exception:
-            redis_prompt = None
+        # Sensors and Actuators
+        sensors = build_sensors_from_config(persona_config.sensors)
+        actuators = build_actuators_from_config(persona_config.actuators)
+        self.tools_count = len(actuators)
 
-        if redis_prompt:
-            self._resolved_system_prompt = redis_prompt
-            self.system_prompt_status = {"success": True, "updated": False, "reason": "from-redis", "latest_key": None}
-            print(f"[PromptUpdater] using redis latest prompt for persona={PERSONA}")
-        else:
-            # No redis prompt: load from file and historize it
-            self.system_prompt_status = prompt_updater.update_system_prompt_with_status(PERSONA)
-            print(f"[PromptUpdater] created/updated prompt from file for persona={PERSONA} -> {self.system_prompt_status}")
-            try:
-                redis_prompt, remarks, feedback = prompt_updater.get_latest_system_prompt(PERSONA)
-            except Exception:
-                redis_prompt = None
-            self._resolved_system_prompt = redis_prompt if redis_prompt else f"{goal.description}"
-
-        # sensory tools
-        sensor_payload = self._load_section_payload_from_redis(PERSONA, "sensors")
-        if isinstance(sensors, str) or isinstance(sensors, Path):
-            sensors = self._initialize_sensors_from_payload(sensor_payload) if sensor_payload else self._initialize_sensors(sensors)
-
-        # actuators
-        actuator_payload = self._load_section_payload_from_redis(PERSONA, "actuators")
-        mcp_tools: List[Any] = []
-        function_tools: List[Any] = []
-        if isinstance(actuators, str) or isinstance(actuators, Path):
-            actuators = self._initialize_mcp_cfg_from_payload(actuator_payload) if actuator_payload else self._initialize_mcp_cfg(actuators)
-
-        if isinstance(actuators, dict):
-            exclude_tools = actuators.get('exclude-tools', [])
-            mcp_tools = self._load_mcp_tools(actuators, exclude_tools)
-            function_tools = actuators.get('builtin-functions', [])
-            self.tools_count = len(mcp_tools + function_tools)
-
-        # memory
-        self.sessions = {} # PLACEHOLDER ONLY
+        # Memory Management
         self.memory_client = self._initialize_memory_manager()
 
-        # notification
+        # Others
         self.email_notification_enabled = os.getenv("EMAIL_NOTIFICATION_ENABLED", "false").lower() == "true"
         if self.email_notification_enabled:
             print("📧 Email notifications enabled. Loading email app password from file...")
             with open(os.getenv("EMAIL_APP_PASSWORD_FILE"), "r") as f:
                 self.email_app_password = f.read().strip()
 
-        # print(f"[I] Initializing {PERSONA} agent with goal \n {goal.description}")
-        # Initialize AutonomousAgent
+
+        # Base class initializations
         AutonomousAgent.__init__(
             self,
-            goal=goal, 
-            sensors=sensors, 
-            actuators=actuators
+            goal=persona_config.goal,
+            sensors=sensors,
+            actuators=actuators,
         )
-        
-        # Initialize Assistant        
+
         Assistant.__init__(
             self,
             llm=llm_cfg,
             system_message=self._resolved_system_prompt,
-            function_list= function_tools + mcp_tools,
-            files=[]
+            function_list=actuators,
+            files=[],
         )
+
         print("Initializing agent with the following system prompt")
-        print("*"*20)
-        print(f"{goal.description}")
+        print("*" * 20)
+        print(f"{persona_config.goal.description}")
+
+    def _resolve_workflow_id(self, percepts: List[Dict], workflow_id: Optional[str] = None) -> str:
+        if workflow_id:
+            return workflow_id
+
+        try:
+            return percepts[0]["data"].get("workflow_id") or str(uuid.uuid4())
+        except Exception:
+            return str(uuid.uuid4())
+
+    def _build_reasoning_prompt(self, percepts: List[Dict], workflow_id: str) -> Dict[str, str]:
+        percept_data = [p.get("data", {}) for p in percepts]
+        return {
+            "role": "user",
+            "content": f"""
+                IMPORTANT! Your task is to **ALWAYS** execute necesary tools for the requested task, even if it task looks similar to a previous request.
+                Do not assume prior execution is sufficient.
+                Percepts: {json.dumps(percept_data)}
+                Current workflow ID: {workflow_id}
+                Action: {self.goal.base_prompt}
+            """
+        }
 
     @staticmethod
     def _apply_mcp_ping_compat_patch():
@@ -260,159 +223,186 @@ class QwenOpsAgent(BaseAgent, AutonomousAgent,Assistant, FromJsonMixin, MemoryMa
                 )
         return total
 
-    async def reason(self, percepts=[], workflow_id=None):
-        # Wrap reason with try except and add handling with memory management and workflow execution recording for evaluations
-        #****************** START OF WORKFLOW ******************
-        print("Perfoming reasoning.... ")
-        workflow_start_time = datetime.now()
-        try:
-            print("Trying to extract workflow id from percepts")
-            workflow_id: str = percepts[0]['data'].get('workflow_id', None) or str(uuid.uuid4())
-            if workflow_id:
-                print(f"Extracted {workflow_id} from percepts")
-        except Exception as e:
-            workflow_id = str(uuid.uuid4())
-
-        # TODO Prompt should be dynamic, and base prompt should always be retrieved to accomodate prompt updates.
-        prompt = {
-            'role': 'user', 
-            'content': f"""
-                IMPORTANT! Your task is to **ALWAYS** execute necesary tools for the requested task, even if it task looks similar to a previous request.
-                Do not assume prior execution is sufficient.
-                Percepts: {json.dumps([p['data'] for p in percepts])}
-                Current workflow ID: {workflow_id}
-                Action: {self.goal.base_prompt}
-            """
-        }
-
-        # THIS PROMPT IS FOR MOCK PLAN ONLY
-        # prompt = {
-        #     'role': 'user', 
-        #     'content': f"""
-        #         Percepts: {json.dumps([p['data'] for p in percepts])}
-        #         Current workflow ID: {workflow_id}
-        #         DO NOT execute any tools, this is a test workflow to verify agent planning capabilities.
-        #         I repeat **DO NOT EXECUTE ANY TOOLS**. Just return the plan of which tools would have been executed in a structured format.
-        #         **IMPORTANT** SKIP pre-checks tools when in Plan Mode.
-        #         Action: Plan instructions from perceived event.
-        #     """
-        # }
-
-        print(prompt)
-
-        # Use a deterministic session per workflow to avoid cross-task history bleed.
-        session_id = f"{PERSONA}:{workflow_id}"
+    async def _load_reasoning_session(self, workflow_id: str):
+        session_id = f"{self.persona}:{workflow_id}"
         _, session = await self.get_session(session_id)
-        session : WorkingMemory
+        return session_id, session
 
-        # Add user message to history
-        session.messages.append(prompt)
-        messages = [m.dict() if type(m)!=dict else m for m in session.messages]
-        user_index_flag = len(messages) - 1
-        print(f"📝 After adding user message: {len(messages)} messages in history")
-
+    def _execute_reasoning_turn(self, messages: List[Dict]) -> Dict[str, Any]:
         tmp = ""
-        assistant_response  = ""
         structured_responses: List[Dict] = []
         thoughts: List[str] = []
         task_total_token_cost = None
         task_prompt_token_cost = None
         task_gen_token_cost = None
         ttft = None
+        gen_latency = None
+        assistant_response = ""
+
         try:
-            # TODO Measure generation latency here
-            # TODO Measure TTFT (time to first token)
             gen_time = datetime.now()
+            response = None
             for response in self.run(messages=messages):
                 if ttft is None:
                     ttft = datetime.now() - gen_time
                     print(f"⏱️ Time to first token: {ttft.seconds + ttft.microseconds/1e6} seconds")
                 tmp = typewriter_print(response, tmp)
-                # print("iterator response", type(response), response)
+
             gen_latency = datetime.now() - gen_time
-
-            structured_responses = response
-            # Parse and extract think tags from assistant responses
-            structured_responses = parse_think_tags_from_responses(structured_responses)
-            thoughts = [r.get("thought") for r in structured_responses if r.get("role") == "assistant" and r.get("thought")]
-            task_prompt_token_cost = self.compute_prompt_token_length(messages=messages, lang="en")
-            print(f"[TokenUsage] Prompt tokens: {task_prompt_token_cost}")
-            assistant_responses = [r for r in structured_responses if r['role']=='assistant' ]
-            task_gen_token_cost = self.compute_total_tokens(assistant_responses)
-            task_total_token_cost = task_prompt_token_cost + task_gen_token_cost
-
-            print(f"Assistant response: {assistant_response}")
-            assistant_response = response[-1]['content'] # Most workflow agent answer are now in markdown format. 
-            
+            structured_responses = parse_think_tags_from_responses(response or [])
+            thoughts = [
+                r.get("thought")
+                for r in structured_responses
+                if r.get("role") == "assistant" and r.get("thought")
+            ]
+            # Keep execution focused: metrics are collected separately
+            if response:
+                assistant_response = response[-1].get("content", "")
         except Exception as e:
             assistant_response = f"Error: {type(e)} {str(e)}"
-        #****************** END OF WORKFLOW ******************
-        workflow_latency = datetime.now() - workflow_start_time
 
-        #****************** START OF WORKFLOW STATS AND TRACEABILITY ******************
-        # Determine if tools called have response, record tool execcution details for evaluations
+        return {
+            "structured_responses": structured_responses,
+            "assistant_response": assistant_response,
+            "thoughts": thoughts,
+            "task_total_token_cost": task_total_token_cost,
+            "task_prompt_token_cost": task_prompt_token_cost,
+            "task_gen_token_cost": task_gen_token_cost,
+            "ttft": ttft,
+            "gen_latency": gen_latency,
+        }
+
+    def _collect_reasoning_metrics(self, messages: List[Dict], structured_responses: List[Dict], ttft: Optional[datetime], gen_latency: Optional[datetime]) -> Dict[str, Any]:
+        task_prompt_token_cost = None
+        task_gen_token_cost = None
+        task_total_token_cost = None
+
+        try:
+            task_prompt_token_cost = self.compute_prompt_token_length(messages=messages, lang="en")
+            print(f"[TokenUsage] Prompt tokens: {task_prompt_token_cost}")
+            assistant_responses = [r for r in structured_responses if r.get("role") == "assistant"]
+            task_gen_token_cost = self.compute_total_tokens(assistant_responses)
+            task_total_token_cost = (task_prompt_token_cost or 0) + (task_gen_token_cost or 0)
+        except Exception as e:
+            print(f"[W] Metrics collection failed: {e}")
+
+        return {
+            "task_prompt_token_cost": task_prompt_token_cost,
+            "task_gen_token_cost": task_gen_token_cost,
+            "task_total_token_cost": task_total_token_cost,
+            "ttft": ttft,
+            "gen_latency": gen_latency,
+        }
+
+    async def _record_workflow_execution(
+        self,
+        prompt: Dict[str, str],
+        session_id: str,
+        workflow_id: str,
+        session: WorkingMemory,
+        run_result: Dict[str, Any],
+        workflow_start_time: datetime,
+    ) -> Any:
+        structured_responses = run_result.get("structured_responses") or []
+        response_messages = structured_responses or [
+            {"role": "assistant", "content": run_result.get("assistant_response", "")}
+        ]
+
         print("Processing workflow")
-        workflow_exec  = process_workflow_execution(
-            session_id = session_id,
-            workflow_id = workflow_id,
-            task = prompt['content'], 
-            response_messages = structured_responses,
-            agent_type = PERSONA,
-            #TODO agent mode args
+        workflow_exec = process_workflow_execution(
+            session_id=session_id,
+            workflow_id=workflow_id,
+            task=prompt["content"],
+            response_messages=response_messages,
+            agent_type=self.persona,
         )
-        workflow_exec.task_total_token_cost = task_total_token_cost
-        workflow_exec.task_prompt_token_cost = task_prompt_token_cost
-        workflow_exec.task_gen_token_cost = task_gen_token_cost
-        workflow_exec.ttft = ttft.seconds + ttft.microseconds/1e6 if ttft else None
-        # workflow_exec.model_generation_latency = gen_latency.seconds + gen_latency.microseconds/1e6
-        workflow_exec.workflow_latency = workflow_latency.seconds + workflow_latency.microseconds/1e6
+
+        # Collect token/latency metrics using helper (if available)
+        try:
+            messages_for_metrics = [m.dict() if type(m) != dict else m for m in session.messages]
+        except Exception:
+            messages_for_metrics = []
+
+        metrics = self._collect_reasoning_metrics(
+            messages=messages_for_metrics,
+            structured_responses=structured_responses,
+            ttft=run_result.get("ttft"),
+            gen_latency=run_result.get("gen_latency"),
+        )
+
+        workflow_exec.task_total_token_cost = metrics.get("task_total_token_cost")
+        workflow_exec.task_prompt_token_cost = metrics.get("task_prompt_token_cost")
+        workflow_exec.task_gen_token_cost = metrics.get("task_gen_token_cost")
+
+        ttft = metrics.get("ttft")
+        workflow_exec.ttft = ttft.seconds + ttft.microseconds / 1e6 if ttft else None
+        gen_latency = metrics.get("gen_latency")
+        workflow_exec.model_generation_latency = (
+            gen_latency.seconds + gen_latency.microseconds / 1e6 if gen_latency else None
+        )
+
+        workflow_latency = datetime.now() - workflow_start_time
+        workflow_exec.workflow_latency = workflow_latency.seconds + workflow_latency.microseconds / 1e6
         workflow_exec.system_prompt_ref = self.system_prompt_status.get("latest_key", None) if self.system_prompt_status else None
-        workflow_exec.thoughts = thoughts
+        workflow_exec.thoughts = run_result.get("thoughts", [])
 
         if workflow_exec.all_tools_verified:
             print("All tool calls verified!")
         else:
-            assistant_response = f"Unverified Tool Calls Found!"
+            print("Unverified Tool Calls Found!")
 
-        # record workflow
         print("Recording workflow state")
         workflow_exec.record_workflow_state()
-        #****************** END OF WORKFLOW STATS AND TRACEABILITY *******************
 
-        #****************** START OF NOTIFICATION ******************
         if self.email_notification_enabled:
             send_notification(
                 recipient_email="aglubagerry@gmail.com",
                 subject=f"Workflow Execution Complete - {workflow_id}",
                 body=workflow_exec.result,
-                app_password=self.email_app_password
+                app_password=self.email_app_password,
             )
 
-
-
-        #****************** START OF HISTORIZATION ******************
         print("Historization")
-        # Add assistant responses to history
-        if structured_responses:
-            memory_msgs = [MemoryMessage(role=sr['role'],content=sr['content']) for sr  in structured_responses[-1:]]
-            session.messages.extend(memory_msgs) #final answer only
-
-        await self.memory_client.put_working_memory(
-            session_id = session_id,
-            memory = session
+        final_message = response_messages[-1]
+        session.messages.append(
+            MemoryMessage(role=final_message["role"], content=final_message["content"])
         )
-        #****************** END OF HISTORIZATION ******************
+        await self.memory_client.put_working_memory(
+            session_id=session_id,
+            memory=session,
+        )
+
+        return workflow_exec
+
+    async def reason(self, percepts=[], workflow_id=None):
+        print("Perfoming reasoning.... ")
+        workflow_start_time = datetime.now()
+        workflow_id = self._resolve_workflow_id(percepts, workflow_id)
+        print(f"Extracted {workflow_id} from percepts")
+
+        prompt = self._build_reasoning_prompt(percepts, workflow_id)
+        print(prompt)
+
+        session_id, session = await self._load_reasoning_session(workflow_id)
+        session.messages.append(prompt)
+        session_messages = [m.dict() if type(m) != dict else m for m in session.messages]
+        print(f"📝 After adding user message: {len(session_messages)} messages in history")
+
+        run_result = self._execute_reasoning_turn(session_messages)
+        await self._record_workflow_execution(
+            prompt=prompt,
+            session_id=session_id,
+            workflow_id=workflow_id,
+            session=session,
+            run_result=run_result,
+            workflow_start_time=workflow_start_time,
+        )
 
 async def main():
-    inference_server_type = os.getenv("INFERENCE_SERVER_TYPE", "tensorrt-llm")
-    agent = QwenOpsAgent(
-        goal = f"./personas/{PERSONA}/goal.yaml",
-        sensors = f"./personas/{PERSONA}/sensors.yaml",
-        llm_cfg = f"./templates/llm/qwen.{inference_server_type}.yaml",
-        actuators = f"./personas/{PERSONA}/actuators.yaml",
-        prune_intermediate_task_contexts = True
-    )
-    # agent.session_id = await agent.create_session(PERSONA)
+    base_path = Path(__file__).resolve().parent
+    resolver = ConfigResolver()
+    persona_config = resolver.resolve(PERSONA, base_path)
+    agent = QwenOpsAgent(persona_config=persona_config)
     await agent.launch()
 
 if __name__ == "__main__":

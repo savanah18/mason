@@ -1,57 +1,54 @@
-import os
-import uuid
+from typing import Optional
 
-# Memory Managment
-from transformers import AutoTokenizer
-from agent_memory_client import MemoryAPIClient, MemoryClientConfig
+from agent_memory_client import MemoryAPIClient
 from agent_memory_client.models import WorkingMemory
+
+from .session_store import MemorySessionStore
 
 
 class MemoryManagementMixin:
     def _initialize_memory_manager(self) -> MemoryAPIClient :
-        """Initialize Memory Manager"""
-        memory_client_config = MemoryClientConfig(
-            base_url = os.getenv("AGENT_MEMORY_SERVER_URL", "http://agent-memory-server-api:8000"),
-            default_namespace = "chat"
-        )
-        print(f"Initializing agent memory client with config \n {memory_client_config}")
-        return MemoryAPIClient(memory_client_config)
+        """Initialize Memory Manager."""
+        return self._initialize_memory_store().memory_client
+
+    def _initialize_memory_store(self) -> MemorySessionStore:
+        """Create or reuse the session store backing memory operations."""
+        store = getattr(self, "memory_store", None)
+        if store is None:
+            store = MemorySessionStore()
+            self.memory_store = store
+            self.memory_client = store.memory_client
+            self.sessions = store.sessions
+        return store
 
     async def create_session(self, user_id = None) -> str:
         """Create a new chat session."""
-        session_id = str(uuid.uuid4())
-        print("Sessions: ", self.sessions)
-        await self.memory_client.get_or_create_working_memory(
-            session_id = session_id,
-            user_id = user_id or self.__class__.__name__
-        )
-        self.sessions[session_id] =  {}
-        
-        print(f"📝 Created session: {session_id}")
-        return session_id
+        store = self._initialize_memory_store()
+        return await store.create_session(user_id=user_id, owner=self.__class__.__name__)
 
     async def get_session(self, session_id: str) -> tuple[bool, WorkingMemory]:
         """Get session by ID."""
-        created, session = await self.memory_client.get_or_create_working_memory(
-            session_id = session_id
-        )
-        return created, session
+        store = self._initialize_memory_store()
+        return await store.get_session(session_id)
     
     def clear_session(self, session_id: str) -> bool:
         """Clear a chat session and cleanup execution cache for this session."""
-        if session_id in self.sessions:
-            # TODO promote to long-term before 
-            # self.sessions[session_id]["messages"] = []
-            # self.sessions[session_id]["last_updated"] = datetime.utcnow().isoformat()
-            print(f"🗑 Cleared session: {session_id}")
-            return True
-        return False
+        store = self._initialize_memory_store()
+        return store.clear_session(session_id)
 
     def delete_session(self, session_id: str) -> bool:
         """Delete a session and cleanup execution cache."""
-        if session_id in self.sessions:
-            # TODO promote to long-term before
-            # del self.sessions[session_id]
-            # print(f"🗑 Deleted session: {session_id}")
-            return True
-        return False
+        store = self._initialize_memory_store()
+        return store.delete_session(session_id)
+    
+# some utilities
+def compact_assistant_chunk_text(text: str, max_chars: int) -> str:
+    """Compact streaming assistant text to a bounded size for context retention."""
+    if not isinstance(text, str):
+        text = str(text)
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+
+    tail = text[-max_chars:]
+    return "[Compacted]\n" + tail

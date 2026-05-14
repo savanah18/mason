@@ -54,20 +54,25 @@ class PromptUpdater:
 		result = self.update_system_prompt_with_status(persona=persona, system_prompt=system_prompt)
 		return bool(result.get("success", False))
 
-	def update_system_prompt_with_status(self, persona: str, system_prompt: Optional[str] = None) -> Dict[str, Any]:
-		"""Update latest/historized prompt and return structured status details."""
-		try:
+	def resolve_system_prompt(self, persona: str, system_prompt: Optional[str] = None) -> Dict[str, Any]:
+		"""Resolve, persist, and return the active system prompt for a persona.
 
+		This combines the current Redis latest prompt lookup with the YAML fallback/update
+		path so callers can consume a single result instead of re-implementing the branch.
+		"""
+		try:
 			current_prompt, remarks, feedback = system_prompt or self._load_system_prompt_from_goal_yaml(persona)
 			current_prompt = (current_prompt or "").strip()
 			if not current_prompt:
-				print(f"[PromptUpdater] Empty prompt for persona={persona}; skipping update")
 				return {
 					"success": False,
 					"updated": False,
 					"reason": "empty-prompt",
 					"persona": persona,
 					"latest_key": None,
+					"prompt": None,
+					"remarks": {},
+					"feedback": None,
 				}
 
 			client = self._redis_client()
@@ -75,25 +80,25 @@ class PromptUpdater:
 			historized_key = f"system-prompts:{persona}:{self._now_key_suffix()}"
 
 			try:
-				existing_prompt = client.hgetall(latest_key)
+				existing_prompt = client.hgetall(latest_key) or {}
 				print(f"[PromptUpdater] Fetched existing prompt for persona={persona}")
 			except Exception as exc:
 				print(f"[PromptUpdater] Error fetching existing prompt for persona={persona}: {exc}")
-				# existing_prompt = None
+				existing_prompt = {}
+
+			mapping = {
+				"prompt": current_prompt,
+				"metadata": json.dumps({
+					"persona": persona,
+					"created_at": historized_key,
+				}),
+				"remarks": json.dumps(remarks),
+				"feedback": json.dumps(feedback),
+			}
 
 			if not existing_prompt.get("prompt"):
-				print("DEBUG", latest_key, historized_key)
-				mapping = {
-					"prompt": current_prompt,
-					"metadata": json.dumps({
-						"persona": persona,
-						"created_at": historized_key,
-					}),
-					"remarks": json.dumps(remarks),
-					"feedback": json.dumps(feedback),
-				}
-				client.hset(latest_key,mapping=mapping)
-				client.hset(historized_key,mapping=mapping)
+				client.hset(latest_key, mapping=mapping)
+				client.hset(historized_key, mapping=mapping)
 				client.expire(historized_key, self.ONE_MONTH_TTL_SECONDS)
 				print(f"[PromptUpdater] Created latest and historized prompt for persona={persona}")
 				return {
@@ -102,20 +107,14 @@ class PromptUpdater:
 					"reason": "created",
 					"persona": persona,
 					"latest_key": historized_key,
+					"prompt": current_prompt,
+					"remarks": remarks,
+					"feedback": feedback,
 				}
 
-			if existing_prompt["prompt"] != current_prompt:
-				mapping = {
-					"prompt": current_prompt,
-					"metadata": json.dumps({
-						"persona": persona,
-						"created_at": historized_key,
-					}),
-					"remarks": json.dumps(remarks),
-					"feedback": json.dumps(feedback),
-				}
-				client.hset(latest_key,mapping=mapping)
-				client.hset(historized_key,mapping=mapping)
+			if existing_prompt.get("prompt") != current_prompt:
+				client.hset(latest_key, mapping=mapping)
+				client.hset(historized_key, mapping=mapping)
 				client.expire(historized_key, self.ONE_MONTH_TTL_SECONDS)
 				print(f"[PromptUpdater] Updated latest and historized prompt for persona={persona}")
 				return {
@@ -124,25 +123,44 @@ class PromptUpdater:
 					"reason": "updated",
 					"persona": persona,
 					"latest_key": historized_key,
+					"prompt": current_prompt,
+					"remarks": remarks,
+					"feedback": feedback,
 				}
 
 			print(f"[PromptUpdater] No prompt change detected for persona={persona}")
+			latest_created_at = None
+			if "metadata" in existing_prompt:
+				try:
+					latest_created_at = json.loads(existing_prompt["metadata"]).get("created_at")
+				except Exception:
+					latest_created_at = None
 			return {
 				"success": True,
 				"updated": False,
 				"reason": "no-change",
 				"persona": persona,
-				"latest_key": json.loads(existing_prompt["metadata"])["created_at"] if "metadata" in existing_prompt else None,
+				"latest_key": latest_created_at,
+				"prompt": existing_prompt.get("prompt", current_prompt),
+				"remarks": remarks,
+				"feedback": feedback,
 			}
 		except Exception as exc:
-			print(f"[PromptUpdater] Failed to update prompt for persona={persona}: {exc}")
+			print(f"[PromptUpdater] Failed to resolve prompt for persona={persona}: {exc}")
 			return {
 				"success": False,
 				"updated": False,
 				"reason": str(exc),
 				"persona": persona,
 				"latest_key": None,
+				"prompt": None,
+				"remarks": {},
+				"feedback": None,
 			}
+
+	def update_system_prompt_with_status(self, persona: str, system_prompt: Optional[str] = None) -> Dict[str, Any]:
+		"""Update latest/historized prompt and return structured status details."""
+		return self.resolve_system_prompt(persona=persona, system_prompt=system_prompt)
 
 	def _load_system_prompt_from_goal_yaml(self, persona: str) -> Tuple[str, dict, str]:
 		base_dir = Path(__file__).resolve().parents[2]

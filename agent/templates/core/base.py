@@ -8,7 +8,7 @@ from typing import Dict, Iterator, List, Literal, Optional, Union, Any
 from transformers import AutoTokenizer
 from qwen_agent.tools.mcp_manager import MCPManager
 
-from .mcp_compat import apply_mcp_ping_compat_patch
+from .utils import apply_mcp_ping_compat_patch
 
 
 class BaseAgent:

@@ -10,14 +10,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 import uvicorn
 
-from templates.data_models.chat import (
+from templates.chat.data_models import (
     ChatMessage,
     ChatRequest,
     ChatResponse,
     ChatHistory,
     SessionSummary
 )
-from templates.data_models.health import HealthResponse
+from templates.chat.health import HealthResponse
 from templates.core.chat_agent import ChatAgentBackend
 from actions.tools.kafka.tools import (
     KafkaProduceMessage

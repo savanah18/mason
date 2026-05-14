@@ -4,12 +4,12 @@ from typing import List, Any
 import os
 
 from .sensor import Sensor, KafkaEventListener
-from templates.config.goals import GoalConfig, Goal
-from templates.config.kafka import KafkaEventListenerConfig
-from ..config.goals import Goal
+from .config.goals import GoalConfig, Goal
+from .config.kafka import KafkaEventListenerConfig
+from .config.goals import Goal
 
 # Agent LIfecyle Management
-from .agent_registry import AgentRegistry
+from .alcm.agent_registry import AgentRegistry
 registry = AgentRegistry()
 
 PERSONA = os.getenv("PERSONA","deployer")
@@ -24,6 +24,7 @@ class AutonomousAgent:
     ):
         self.goal = goal
         self.sensors = sensors
+        self.actuators = actuators
         self.is_terminated = False
         # others
         self.verbose = kwargs.get('verbose') or False

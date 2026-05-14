@@ -6,7 +6,7 @@ import re
 
 from kafka import KafkaConsumer
 
-from ..config.kafka import KafkaEventListenerConfig
+from .config.kafka import KafkaEventListenerConfig
 
 def safe_deserializer(m):
     if not m:
@@ -74,3 +74,25 @@ class KafkaEventListener(Sensor):
                 self.consumer.commit()
             # Return after first message for single-shot acquisition
             return
+
+
+def build_sensors_from_config(sensor_config: Any) -> List[Sensor]:
+    """Build live Sensor instances from resolved sensor config."""
+    sensors: List[Sensor] = []
+    sensor_defs = sensor_config.get("spec", []) if isinstance(sensor_config, dict) else sensor_config
+
+    sensor_registry = {
+        "KafkaEventListener": KafkaEventListener,
+    }
+    config_registry = {
+        "KafkaEventListenerConfig": KafkaEventListenerConfig,
+    }
+
+    for sensor in sensor_defs or []:
+        sensor_cls = sensor_registry.get(sensor.get("type"))
+        config_cls = config_registry.get(sensor.get("config_type"))
+        if sensor_cls is None or config_cls is None:
+            raise ValueError(f"Unsupported sensor definition: {sensor}")
+        sensors.append(sensor_cls(config=config_cls.from_json(sensor)))
+
+    return sensors

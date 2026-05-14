@@ -18,12 +18,6 @@ from qwen_agent.tools.mcp_manager import MCPManager
 from qwen_agent.utils.tokenization_qwen import tokenizer as qwen_tokenizer
 from qwen_agent.utils.utils import extract_text_from_message
 from qwen_agent.utils.output_beautify import typewriter_print
-from templates.core.context_compaction import (
-    compact_assistant_chunk_text,
-    inject_execution_id_context,
-    prune_session_history,
-    select_context_messages,
-)
 
 
 # Memory Managment
@@ -31,15 +25,15 @@ from transformers import AutoTokenizer
 from agent_memory_client import MemoryAPIClient, MemoryClientConfig
 from agent_memory_client.models import WorkingMemory, MemoryMessage
 
-from templates.core.prompt_manager import PromptUpdater
-from templates.core.mcp_compat import apply_mcp_ping_compat_patch
-from templates.core.workflows import (
+from .prompts.prompt_manager import PromptUpdater
+from .utils import apply_mcp_ping_compat_patch
+from .workflows import (
     process_workflow_execution,
     sanitize_faux_tool_transcript
 )
 
 from .base import BaseAgent, parse_think_tags_from_responses
-from ..memory.management.agent_memory_mixin import MemoryManagementMixin
+from ..memory.management.agent_memory_mixin import MemoryManagementMixin, compact_assistant_chunk_text
 
 
 AGENT_MODE = os.getenv("AGENT_MODE","prod")

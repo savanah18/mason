@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 
+
 class ChatMessage(BaseModel):
     role: str  # "user" or "assistant"
     content: str
@@ -16,6 +17,7 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     workflow_id: Optional[str] = None
 
+
 class ChatResponse(BaseModel):
     session_id: str
     response: str
@@ -26,13 +28,22 @@ class ChatResponse(BaseModel):
     input_length: int    # Character count of prompt sent to LLM
     workflow_id: Optional[str] = None
 
+
 class ChatHistory(BaseModel):
     session_id: str
     messages: List[ChatMessage]
     # created_at: str
 
 
+
 class SessionSummary(BaseModel):
     session_id: str
     timestamp: float
     first_user_message: Optional[str] = None
+
+
+class HealthResponse(BaseModel):
+    status: str
+    mcp_tools_loaded: int
+    sessions_active: int
+    backend_version: str
