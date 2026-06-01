@@ -169,7 +169,7 @@ services:
     - oci-registry 
     volumes:
     - ./agent/personas:/app/personas:rw
-    - ./agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw # for dev purposes only
+    #- ./agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw # for dev purposes only
     - ./agent/templates:/app/templates:rw
     - ./agent/actions/:/app/actions:rw
     - ./agent/memory/:/app/memory:rw

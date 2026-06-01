@@ -69,3 +69,9 @@ Each hash also keeps a historized copy with a timestamp suffix and a one-month T
 - The spawned container uses image `agent-generic:latest`.
 - Container name is `<persona>-agent`.
 - Runtime defaults mirror deployer-agent style env/volumes/secrets/network (`triton-ai-network`).
+
+## Lifecycle Visualization
+
+Agent lifecycle management flow is documented in:
+
+- `management/backend/AGENT_LIFECYCLE_MANAGEMENT.mmd`

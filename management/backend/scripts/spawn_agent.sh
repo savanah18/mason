@@ -23,7 +23,7 @@ if [[ "$FORCE_RECREATE" == "true" ]] && docker ps -a --format '{{.Names}}' | gre
   docker rm -f "$CONTAINER_NAME" >/dev/null
 fi
 
-echo "Inference Server Type: ${INFERENCE_SERVER_TYPE:-tensorrt-llm}"
+echo "Inference Server Type: ${INFERENCE_SERVER_TYPE:-vllm}"
 
 cmd=(
   docker run -d
@@ -34,38 +34,44 @@ cmd=(
   -e KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-kafka-server:9092}"
   -e KUBECONFIG=/run/secrets/kubernetes-config
   -e AGENT_MODE="${AGENT_MODE:-dev}"
-  -e INFERENCE_SERVER_TYPE="${INFERENCE_SERVER_TYPE:-tensorrt-llm}"
+  -e INFERENCE_SERVER_TYPE="${INFERENCE_SERVER_TYPE:-vllm}"
   -e PERSONA="$PERSONA"
   -e EMAIL_NOTIFICATION_ENABLED="${EMAIL_NOTIFICATION_ENABLED:-true}"
   -e EMAIL_APP_PASSWORD_FILE=/run/secrets/google-app-token
-  -v "$PROJECT_ROOT/agent/personas:/app/personas:rw"
-  -v "$PROJECT_ROOT/agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw"
-  -v "$PROJECT_ROOT/agent/templates:/app/templates:rw"
-  -v "$PROJECT_ROOT/agent/actions:/app/actions:rw"
-  -v "$PROJECT_ROOT/agent/memory:/app/memory:rw"
-  -v "$PROJECT_ROOT/agent/notifications:/app/notifications:rw"
+  -v "/root/workspace/lnd/aiops/apps/newbie-app/agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw"
+  -v "/root/workspace/lnd/aiops/apps/newbie-app/agent/personas:/app/personas:rw"
+  -v "/root/workspace/lnd/aiops/apps/newbie-app/agent/templates:/app/templates:rw"
+  -v "/root/workspace/lnd/aiops/apps/newbie-app/agent/actions:/app/actions:rw"
+  -v "/root/workspace/lnd/aiops/apps/newbie-app/agent/memory:/app/memory:rw"
+  -v "/root/workspace/lnd/aiops/apps/newbie-app/agent/notifications:/app/notifications:rw"
+  -v "/root/workspace/lnd/aiops/vlm/Qwen/Qwen2.5-7B-Instruct:/mnt/checkpoint:rw"
+  -v "/root/workspace/lnd/aiops/apps/newbie-app/agent/.secrets/oci-registry:/run/secrets/oci-registry:ro"
+  -v "/root/.kube/config:/run/secrets/kubernetes-config:ro" 
+  -v "/root/.google-app-token:/run/secrets/google-app-token:ro"
+  -v "/root/.config/gcloud:/root/.config/gcloud:rw" 
 )
 
-if [[ -n "${HOST_MODEL_CKPT:-}" ]] && [[ -e "${HOST_MODEL_CKPT}" ]]; then
-  cmd+=( -v "${HOST_MODEL_CKPT}:/mnt/checkpoint:rw" )
-elif [[ -e "/root/workspace/lnd/aiops/vlm/Qwen/Qwen2.5-7B-Instruct" ]]; then
-  cmd+=( -v "/root/workspace/lnd/aiops/vlm/Qwen/Qwen2.5-7B-Instruct:/mnt/checkpoint:rw" )
-fi
+# if [[ -n "${HOST_MODEL_CKPT:-}" ]] && [[ -e "${HOST_MODEL_CKPT}" ]]; then
+#   cmd+=( -v "${HOST_MODEL_CKPT}:/mnt/checkpoint:rw" )
+# elif [[ -e "/root/workspace/lnd/aiops/vlm/Qwen/Qwen2.5-7B-Instruct" ]]; then
+#   cmd+=( -v "/root/workspace/lnd/aiops/vlm/Qwen/Qwen2.5-7B-Instruct:/mnt/checkpoint:rw" )
+# fi
 
-if [[ -e "$PROJECT_ROOT/.secrets/oci-registry" ]]; then
-  cmd+=( -v "$PROJECT_ROOT/.secrets/oci-registry:/run/secrets/oci-registry:ro" )
-fi
-if [[ -e "${HOME}/.kube/config" ]]; then
-  cmd+=( -v "${HOME}/.kube/config:/run/secrets/kubernetes-config:ro" )
-fi
-if [[ -e "${HOME}/.google-app-token" ]]; then
-  cmd+=( -v "${HOME}/.google-app-token:/run/secrets/google-app-token:ro" )
-fi
-if [[ -d "${HOME}/.config/gcloud" ]]; then
-  cmd+=( -v "${HOME}/.config/gcloud:/root/.config/gcloud:rw" )
-fi
+# if [[ -e "/root/workspace/lnd/aiops/apps/newbie-app/agent/.secrets/oci-registry" ]]; then
+#   cmd+=( -v "/root/workspace/lnd/aiops/apps/newbie-app/agent/.secrets/oci-registry:/run/secrets/oci-registry:ro" )
+# fi
+# if [[ -e "/root/.kube/config" ]]; then
+#   cmd+=( -v "/root/.kube/config:/run/secrets/kubernetes-config:ro" )
+# fi
+# if [[ -e "/root/.google-app-token" ]]; then
+#   cmd+=( -v "/root/.google-app-token:/run/secrets/google-app-token:ro" )
+# fi
+# if [[ -d "/root/.config/gcloud" ]]; then
+#   cmd+=( -v "/root/.config/gcloud:/root/.config/gcloud:rw" )
+# fi
 
 cmd+=( "$IMAGE" python -u qwen-ops-agent.py )
+# cmd+=( "$IMAGE" sleep 6000 )
 
 if [[ "$DRY_RUN" == "true" ]]; then
   printf 'DRY_RUN: '

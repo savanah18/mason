@@ -267,7 +267,7 @@ class ChatAgentBackend(BaseAgent, MemoryManagementMixin):
 
         print("User message: ", user_message)
         # Add user message to history
-        session.messages.append({"role": "user", "content": f"{user_message}" })
+        session.messages.append({"role": "user", "content": f"{user_message}. Double check if all tools are called correctly." })
         messages = [m.dict() if type(m)!=dict else m for m in session.messages]
         user_index_flag = len(messages) - 1
         print(f"📝 After adding user message: {len(messages)} messages in history")
@@ -343,8 +343,11 @@ class ChatAgentBackend(BaseAgent, MemoryManagementMixin):
 
         # Add assistant responses to history
         if structured_responses:
-            memory_msgs = [MemoryMessage(role=sr['role'],content=sr['content']) for sr  in structured_responses[-1:]]
-            session.messages.extend(memory_msgs) #final answer only
+            try:
+                memory_msgs = [MemoryMessage(role=sr['role'],content=sr['content']) for sr  in structured_responses[-1:]]
+                session.messages.extend(memory_msgs) #final answer only
+            except Exception as e:
+                print(f"Error adding assistant response to session history: {e}")
 
 
         print(f"✅ After agent response: {len(session.messages)} total messages in session")

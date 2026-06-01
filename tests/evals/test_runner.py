@@ -136,7 +136,7 @@ def main(argv):
     # Generate test ID and date for this test run
     if not test_id:
         test_id = str(uuid.uuid4())
-    date_str = datetime.now().strftime("%Y%m%d")
+    date_str = "20260508" #datetime.now().strftime("%Y%m%d")
     workflow_ids = []
     
     # Set up metadata file and checkpoint file for continuous appending
