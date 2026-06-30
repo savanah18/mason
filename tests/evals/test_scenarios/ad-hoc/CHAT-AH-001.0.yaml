@@ -1,0 +1,34 @@
+id: CHAT-AH-001.0
+chat-prompt: |
+  Ad-hoc request: show a compact workload inventory for media-microservices namespace.
+  Return deployment/statefulset/daemonset counts and key cpu/memory settings.
+  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
+pre-condition-script: |
+  # Pre-condition: media-microservices namespace should be available.
+  kubectl get ns media-microservices || kubectl create ns media-microservices
+execution-script: |
+  export CHAT_ENDPOINT=127.0.0.1:8002
+  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+
+  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  echo CHAT_PROMPT: ${CHAT_PROMPT}
+  echo SESSION_ID: ${SESSION_ID}
+
+  json_payload=$(jq -n \
+  --arg message "$CHAT_PROMPT" \
+  --arg session_id "$SESSION_ID" \
+  --arg workflow_id "$WORKFLOW_ID" \
+  '{message: $message, session_id: $session_id, workflow_id: $workflow_id}')
+
+  curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+    -H "Content-Type: application/json" \
+    -d "$json_payload"
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=chat
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  # No cleanup required for read-only inventory scenario.
+  true

@@ -1,0 +1,30 @@
+id: RES-E-MOCK-PLAN-016
+chat-prompt: |
+  Given the following environment scenarios.
+  Scenarios:
+  - Optimization target: release `search-api`, namespace `platform-core`.
+  - Operating context: chaos-injected test window with intermittent disruptions.
+  - Edge case A: daemonset pressure on nodes causes scheduling contention for latency-sensitive pods.
+  - Edge case B: resource-collector CPU query returns sparse datapoints for some pods because of short-lived restarts.
+  - Edge case C: previous optimization increased limits but lowered requests too aggressively, causing throttling under burst.
+  - Constraint 1: Plan must identify high-impact services before applying any resource updates.
+  - Constraint 2: Plan must produce auditable output with timestamps, decisions, and workflow traceability.
+  - Constraint 3: Plan must include namespace quota retrieval before final optimization recommendations.
+  - Additional realism: include fallback logic for transient failures, explicit safety checks before applying resource updates, and clear stop conditions when metrics degrade.
+  - Additional realism: assume unstable signals (event noise, delayed readiness, partial failures) and require a conservative, auditable optimization plan.
+
+  **IMPORTANT** Do not execute any tools.
+  Instead, provide a recommended plan to safely optimize resiliency and performance for search-api in namespace platform-core.
+
+pre-condition-script: |
+
+execution-script: |
+  python3 tools/mock_plan_resiliency_kafka_test_runner.py
+expected-execution-time: "1200"
+output-retrieval-script: |
+  PERSONA=resiliency-optimizer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  true

@@ -1,0 +1,24 @@
+id: DEP-G-001.0
+chat-prompt: |
+  Please process a release lifecycle recovery for media-api in namespace media-lifecycle.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx and converge to version 22.6.10.
+  Context: a prior upgrade attempt failed and left revision history in an ambiguous state.
+  Validate release history and recover safely to a healthy target release.
+
+pre-condition-script: |
+  kubectl create ns media-lifecycle --dry-run=client -o yaml | kubectl apply -f -
+  helm uninstall media-api -n media-lifecycle || true
+  helm install media-api oci://registry-1.docker.io/bitnamicharts/nginx --version 22.6.9 -n media-lifecycle
+  helm upgrade media-api oci://registry-1.docker.io/bitnamicharts/nginx --version 0.0.1 -n media-lifecycle || true
+  helm history media-api -n media-lifecycle >/dev/null
+execution-script: |
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "900"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  helm uninstall media-api -n media-lifecycle || true
+  kubectl delete ns media-lifecycle --ignore-not-found=true

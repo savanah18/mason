@@ -1,0 +1,41 @@
+id: DEP-E-001.2
+chat-prompt: |
+  Please process a fresh install for media-api in namespace media.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10. .
+  Since the namespace may already exist, you may choose explicit verification or proactive namespace setup.
+
+pre-condition-script: |
+  # Pre-condition: namespace already exists but target release is absent.
+  echo "Skipping helm repo add: using OCI charts"
+  echo "Skipping helm repo update: using OCI charts"
+  kubectl create ns media --dry-run=client -o yaml | kubectl apply -f -
+  helm uninstall media-api -n media || true
+execution-script: |
+  # Legacy chat transport path disabled for direct agent testing:
+  # export CHAT_ENDPOINT=127.0.0.1:8002
+  # SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+  #
+  # echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  # echo CHAT_PROMPT: ${CHAT_PROMPT}
+  # echo SESSION_ID: ${SESSION_ID}
+  #
+  # # Construct payload
+  # json_payload=$(jq -n \
+  # --arg message "$CHAT_PROMPT" \
+  # --arg session_id "$SESSION_ID" \
+  # '{message: $message, session_id: $session_id}')
+  #
+  # # Send it with curl
+  # curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+  #   -H "Content-Type: application/json" \
+  #   -d "$json_payload"
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "900"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  helm uninstall media-api -n media || true
+  kubectl delete ns media --ignore-not-found=true

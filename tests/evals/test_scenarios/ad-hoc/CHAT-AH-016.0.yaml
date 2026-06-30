@@ -1,0 +1,36 @@
+id: CHAT-AH-016.0
+chat-prompt: |
+  Ad-hoc request: perform a bounded replica adjustment for one workload in namespace search.
+  Use kubernetes-resources_list or kubernetes-pods_list_in_namespace to identify one target, then kubernetes-resources_scale to set a conservative replica count.
+  Keep the change minimal and explain the before/after state.
+  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
+pre-condition-script: |
+  # Pre-condition: search namespace should exist and have at least one deployment.
+  kubectl get ns search || kubectl create ns search
+  kubectl get deploy -n search --no-headers | wc -l
+execution-script: |
+  export CHAT_ENDPOINT=127.0.0.1:8002
+  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+
+  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  echo CHAT_PROMPT: ${CHAT_PROMPT}
+  echo SESSION_ID: ${SESSION_ID}
+
+  json_payload=$(jq -n \
+  --arg message "$CHAT_PROMPT" \
+  --arg session_id "$SESSION_ID" \
+  --arg workflow_id "$WORKFLOW_ID" \
+  '{message: $message, session_id: $session_id, workflow_id: $workflow_id}')
+
+  curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+    -H "Content-Type: application/json" \
+    -d "$json_payload"
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=chat
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} $PERSONA
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  # Bounded scaling scenario for evaluation.
+  true

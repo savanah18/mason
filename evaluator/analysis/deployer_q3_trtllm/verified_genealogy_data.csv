@@ -1,0 +1,8 @@
+redis_key,remarks_created_by,parent_key,redis_optimization_reference,pass_rate,avg_score
+system-prompts:deployer:20260416T004153Z,,,system-prompts:deployer:20260416T004153Z,0.76,8.52
+system-prompts:deployer:20260418T045038Z,user,system-prompts:deployer:20260416T004153Z,system-prompts:deployer:20260418T045038Z,0.68,8.28
+system-prompts:deployer:20260419T101428Z,prompt-optimizer + user,system-prompts:deployer:20260418T045038Z,system-prompts:deployer:20260419T101428Z,0.76,8.9
+system-prompts:deployer:20260420T161010Z,prompt-optimizer + user,system-prompts:deployer:20260419T101428Z,system-prompts:deployer:20260420T161010Z,0.7777777777777778,8.666666666666666
+system-prompts:deployer:20260421T122549Z,prompt-optimizer + user,system-prompts:deployer:20260420T142234Z,system-prompts:deployer:20260421T122549Z,0.72,8.26
+system-prompts:deployer:20260422T005928Z,prompt-optimizer + user,system-prompts:deployer:20260421T122549Z,system-prompts:deployer:20260422T005928Z,0.8,8.753333333333334
+system-prompts:deployer:20260428T063643Z,prompt-optimizer + user,system-prompts:deployer:20260421T122549Z,system-prompts:deployer:20260428T063643Z,0.82,9.05

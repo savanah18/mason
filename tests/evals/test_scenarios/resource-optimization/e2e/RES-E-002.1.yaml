@@ -1,0 +1,65 @@
+id: RES-E-002.1
+chat-prompt: |
+  Please optimize resources for the media-microservices service in media-microservices namespace.
+  This environment has namespace-level resource quotas: (16-32 CPU, 16-32 GB RAM).
+  Run performance benchmarks, collect metrics against targets (avg latency ≤100ms, p90 latency ≤200ms, success ≥99%), and recommend resource allocations respecting quota constraints.
+  Send the optimization request to Kafka topic tests.normal as one JSON event payload.
+  Include release name and namespace (media-microservices) in the payload.
+  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID> and include extra_instruction in the same JSON payload.
+pre-condition-script: |
+  # Pre-condition: Verify media-microservices namespace with generous resource quotas, no pod-level restrictions.
+  kubectl get ns media-microservices || kubectl create ns media-microservices
+  kubectl delete resourcequota media-microservices-quota
+  # Apply namespace-level quota only (no pod-level resources)
+  kubectl apply -f - <<EOF
+  apiVersion: v1
+  kind: ResourceQuota
+  metadata:
+    name: media-microservices-quota
+    namespace: media-microservices
+  spec:
+    hard:
+      requests.cpu: "16"
+      requests.memory: "16Gi"
+      limits.cpu: "32"
+      limits.memory: "32Gi"
+  EOF
+  for deploy in $(kubectl get deployments -n media-microservices --no-headers | awk '{print $1}'); do
+    kubectl patch deployment "$deploy" -n media-microservices --type='json' \
+      -p='[{"op": "replace", "path": "/spec/replicas", "value":1}]' || true
+    kubectl patch deployment "$deploy" -n media-microservices --type='json' \
+      -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/resources", "value":{}}]' || true
+  done
+  
+  sleep 5
+  kubectl patch deployment user-review-service -n media-microservices --type='json' \
+      -p='[{"op": "replace", "path": "/spec/replicas", "value":3}]' || true
+  # kubectl patch deployment nginx-web-server -n media-microservices --type='json' \
+  #     -p='[{"op": "replace", "path": "/spec/replicas", "value":2}]' || true
+  sleep 10
+execution-script: |
+  # export CHAT_ENDPOINT=127.0.0.1:8002
+  # SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+
+  # echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  # echo CHAT_PROMPT: ${CHAT_PROMPT}
+  # echo SESSION_ID: ${SESSION_ID}
+
+  # json_payload=$(jq -n \
+  # --arg message "$CHAT_PROMPT" \
+  # --arg session_id "$SESSION_ID" \
+  # '{message: $message, session_id: $session_id}')
+
+  # curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+  #   -H "Content-Type: application/json" \
+  #   -d "$json_payload"
+  python3 tools/mock_plan_resiliency_kafka_test_runner.py
+expected-execution-time: "1200"
+output-retrieval-script: |
+  PERSONA=resiliency-optimizer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  # Cleanup: Optionally remove generous resource quota; preserve media-microservices namespace and running services
+  kubectl delete resourcequota media-microservices-quota -n media-microservices --ignore-not-found=true

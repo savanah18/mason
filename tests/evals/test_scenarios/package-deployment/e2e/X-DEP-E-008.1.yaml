@@ -1,0 +1,59 @@
+id: DEP-E-008.1
+chat-prompt: |
+  Please process a deploy request for media-api in namespace media.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10.
+  Context: same release name already exists and conflict remediation is required.
+  Scenarios:
+  - Deployment target: release `media-api`, namespace `media`, chart `oci://registry-1.docker.io/bitnamicharts/nginx`, requested version `22.6.10`.
+  - Operating context: same release name already exists and conflict remediation is required.
+  - Edge case A: A release with the same name already exists in the namespace.
+  - Edge case B: An install attempt would likely fail unless the agent decides to upgrade or uninstall first.
+  - Edge case C: Historical revisions exist and should guide the safer remediation path.
+  - Constraint 1: Prefer history-based reasoning before choosing install, upgrade, or rollback.
+  - Constraint 2: Explain why the chosen conflict remediation is safest.
+  - Constraint 3: Check final workload state to ensure no partial deployment remains.
+  - Additional realism: include fallback logic for transient failures, explicit safety checks before rollout, and rollback criteria if health signals degrade.
+  - Additional realism: assume unstable environment signals (event noise, delayed readiness, partial failures) and require a conservative, auditable deployment plan.
+
+  Execute the deployment safely using the tools available to you.
+  Prioritize validation, safe rollout sequencing, and rollback readiness for media-api from oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10.
+
+
+
+pre-condition-script: |
+  kubectl create ns media --dry-run=client -o yaml | kubectl apply -f -
+  helm uninstall media-api -n media || true
+  helm install media-api oci://registry-1.docker.io/bitnamicharts/nginx --version 22.6.9 -n media --create-namespace
+  helm status media-api -n media >/dev/null
+  helm history media-api -n media >/dev/null
+execution-script: |
+  # Legacy chat transport path disabled for direct agent testing:
+  # export CHAT_ENDPOINT=127.0.0.1:8002
+  # SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+  #
+  # echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  # echo CHAT_PROMPT: ${CHAT_PROMPT}
+  # echo SESSION_ID: ${SESSION_ID}
+  #
+  # json_payload=$(jq -n   --arg message "$CHAT_PROMPT"   --arg session_id "$SESSION_ID"   '{message: $message, session_id: $session_id}')
+  #
+  # curl -X POST "${CHAT_ENDPOINT}/chat/send"     -H "Content-Type: application/json"     -d "$json_payload"
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "900"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  if kubectl get ns media >/dev/null 2>&1; then
+    helm uninstall media-api -n media || true
+    helm uninstall media-cache -n media || true
+    kubectl delete resourcequota media-tight-quota -n media --ignore-not-found=true || true
+    kubectl delete resourcequota media-policy-block -n media --ignore-not-found=true || true
+    kubectl delete limitrange media-default-limits -n media --ignore-not-found=true || true
+    kubectl delete configmap media-manual-config -n media --ignore-not-found=true || true
+    kubectl annotate namespace media pod-security.kubernetes.io/enforce- --overwrite || true
+  fi
+  kubectl delete ns media --ignore-not-found=true
+  kubectl wait --for=delete namespace/media --timeout=120s || true

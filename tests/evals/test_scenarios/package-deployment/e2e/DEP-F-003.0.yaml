@@ -1,0 +1,23 @@
+id: DEP-F-003.0
+chat-prompt: |
+  Please process an idempotent publish request for search-db in namespace search.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/postgresql version 18.5.14.
+  The target release already exists, and you should preserve existing credentials while reconciling runtime values safely.
+
+pre-condition-script: |
+  kubectl create ns search --dry-run=client -o yaml | kubectl apply -f -
+  helm uninstall search-db -n search || true
+  kubectl create secret generic search-db-credentials -n search --from-literal=password='test-pass' --dry-run=client -o yaml | kubectl apply -f -
+  helm install search-db oci://registry-1.docker.io/bitnamicharts/postgresql --version 18.5.14 --set global.storageClass=nfs-client -n search
+execution-script: |
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "900"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  helm uninstall search-db -n search || true
+  kubectl delete secret search-db-credentials -n search --ignore-not-found=true || true
+  kubectl delete ns search --ignore-not-found=true

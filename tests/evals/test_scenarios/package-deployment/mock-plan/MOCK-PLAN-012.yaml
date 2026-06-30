@@ -1,0 +1,31 @@
+id: MOCK-PLAN-012
+chat-prompt: |
+  Given the following environment scenarios.
+  Scenarios:
+  - Deployment target: release `billing-worker`, namespace `staging`, chart `oci://registry-1.docker.io/bitnamicharts/redis`, requested version `21.2.4`.
+  - Operating context: cost-optimization sprint with constrained compute.
+  - Edge case A: Mutating webhook injects sidecars unexpectedly, altering resource requests and startup timing.
+  - Edge case B: Upstream dependency endpoint is unstable, causing readiness probe failures after deployment.
+  - Edge case C: Namespace is missing and must be created implicitly; admission webhooks are slow and can time out.
+  - Constraint 1: Validation should include helm-template and helm-lint outcomes under noisy but recoverable warning conditions.
+  - Constraint 2: Rollback path should reference helm-get-history and choose safest known-good revision with justification.
+  - Constraint 3: If release name is already in use, plan should compare upgrade vs uninstall/reinstall trade-offs.
+  - Additional realism: include fallback logic for transient failures, explicit safety checks before rollout, and rollback criteria if health signals degrade.
+  - Additional realism: assume unstable environment signals (event noise, delayed readiness, partial failures) and require a conservative, auditable deployment plan.
+
+  **IMPORTANT** Do not execute any tools.
+  Instead, provide a recommended plan to safely deploy billing-worker from oci://registry-1.docker.io/bitnamicharts/redis version 21.2.4.
+
+
+pre-condition-script: |
+
+execution-script: |
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  true

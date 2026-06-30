@@ -1,0 +1,30 @@
+id: RES-E-MOCK-PLAN-031
+chat-prompt: |
+  Given the following environment scenarios.
+  Scenarios:
+  - Optimization target: release `media-microservices`, namespace `resilience-lab`.
+  - Operating context: regional failover drill with asymmetric traffic.
+  - Edge case A: cluster events show intermittent image pull delays that inflate latency during test phase.
+  - Edge case B: partial rollout leaves mixed pod generations with inconsistent resource settings.
+  - Edge case C: resource-collector memory series contains spikes from sidecar bursts that can mislead peak estimation.
+  - Constraint 1: Plan must include explicit helm-test execution strategy and 5-minute timeout handling.
+  - Constraint 2: Plan must evaluate targets: avg latency <=100ms, p90 <=200ms, success ratio >=99%.
+  - Constraint 3: Plan must include conservative retry logic (up to 3) for transient tool failures.
+  - Additional realism: include fallback logic for transient failures, explicit safety checks before applying resource updates, and clear stop conditions when metrics degrade.
+  - Additional realism: assume unstable signals (event noise, delayed readiness, partial failures) and require a conservative, auditable optimization plan.
+
+  **IMPORTANT** Do not execute any tools.
+  Instead, provide a recommended plan to safely optimize resiliency and performance for media-microservices in namespace resilience-lab.
+
+pre-condition-script: |
+
+execution-script: |
+  python3 tools/mock_plan_resiliency_kafka_test_runner.py
+expected-execution-time: "1200"
+output-retrieval-script: |
+  PERSONA=resiliency-optimizer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  true

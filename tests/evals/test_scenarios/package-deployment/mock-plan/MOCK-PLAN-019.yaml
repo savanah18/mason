@@ -1,0 +1,31 @@
+id: MOCK-PLAN-019
+chat-prompt: |
+  Given the following environment scenarios.
+  Scenarios:
+  - Deployment target: release `recommendation-api`, namespace `prod-like`, chart `oci://registry-1.docker.io/bitnamicharts/nginx`, requested version `22.6.10`.
+  - Operating context: compliance audit week with strict change controls.
+  - Edge case A: Prometheus scraping annotations are mandatory; missing labels can block promotion gates.
+  - Edge case B: Existing release with same name is in failed state with partial resources still present.
+  - Edge case C: ServiceAccount permissions changed recently; post-install checks may fail with RBAC forbidden errors.
+  - Constraint 1: If release name is already in use, plan should compare upgrade vs uninstall/reinstall trade-offs.
+  - Constraint 2: Post-install verification should consider kubernetes-list-workloads readiness mismatches and delayed rollouts.
+  - Constraint 3: Rollback path should reference helm-get-history and choose safest known-good revision with justification.
+  - Additional realism: include fallback logic for transient failures, explicit safety checks before rollout, and rollback criteria if health signals degrade.
+  - Additional realism: assume unstable environment signals (event noise, delayed readiness, partial failures) and require a conservative, auditable deployment plan.
+
+  **IMPORTANT** Do not execute any tools.
+  Instead, provide a recommended plan to safely deploy recommendation-api from oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10.
+
+
+pre-condition-script: |
+
+execution-script: |
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  true

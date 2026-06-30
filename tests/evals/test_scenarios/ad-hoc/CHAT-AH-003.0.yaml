@@ -1,0 +1,35 @@
+id: CHAT-AH-003.0
+chat-prompt: |
+  Ad-hoc request: verify release finance in namespace finance,
+  run helm tests, then publish one status event to Kafka topic tests.normal.
+  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
+pre-condition-script: |
+  # Pre-condition: namespace and target release should exist for test execution.
+  kubectl get ns finance || kubectl create ns finance
+  helm list -n finance | grep -q finance || echo "Release finance may be absent; scenario expects existing release."
+execution-script: |
+  export CHAT_ENDPOINT=127.0.0.1:8002
+  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+
+  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  echo CHAT_PROMPT: ${CHAT_PROMPT}
+  echo SESSION_ID: ${SESSION_ID}
+
+  json_payload=$(jq -n \
+  --arg message "$CHAT_PROMPT" \
+  --arg session_id "$SESSION_ID" \
+  --arg workflow_id "$WORKFLOW_ID" \
+  '{message: $message, session_id: $session_id, workflow_id: $workflow_id}')
+
+  curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+    -H "Content-Type: application/json" \
+    -d "$json_payload"
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=chat
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} $PERSONA
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  # No destructive cleanup for existing release scenario.
+  true

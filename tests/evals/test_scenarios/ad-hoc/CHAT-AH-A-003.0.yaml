@@ -1,0 +1,90 @@
+id: CHAT-AH-A-003.0
+chat-prompt: |
+  Ad-hoc request: compare resource usage across two namespaces (prod-tier and staging-tier).
+  Use workload inspection and resource snapshots to identify which namespace is consuming more CPU/memory per replica.
+  Suggest whether resource requests need rebalancing.
+  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
+pre-condition-script: |
+  # Pre-condition: two namespaces with different resource patterns
+  for ns in prod-tier staging-tier; do
+    kubectl delete ns $ns --ignore-not-found=true || true
+    kubectl wait --for=delete namespace/$ns --timeout=120s || true
+  done
+  kubectl create ns prod-tier
+  kubectl create ns staging-tier
+  kubectl apply -f - <<EOF
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: workload-prod
+    namespace: prod-tier
+  spec:
+    replicas: 2
+    selector:
+      matchLabels:
+        app: workload-prod
+    template:
+      metadata:
+        labels:
+          app: workload-prod
+      spec:
+        containers:
+        - name: app
+          image: nginx:1.27
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+  EOF
+  kubectl apply -f - <<EOF
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: workload-staging
+    namespace: staging-tier
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: workload-staging
+    template:
+      metadata:
+        labels:
+          app: workload-staging
+      spec:
+        containers:
+        - name: app
+          image: nginx:1.27
+          resources:
+            requests:
+              cpu: 150m
+              memory: 192Mi
+  EOF
+  sleep 2
+execution-script: |
+  export CHAT_ENDPOINT=127.0.0.1:8002
+  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+
+  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  echo CHAT_PROMPT: ${CHAT_PROMPT}
+  echo SESSION_ID: ${SESSION_ID}
+
+  json_payload=$(jq -n \
+  --arg message "$CHAT_PROMPT" \
+  --arg session_id "$SESSION_ID" \
+  --arg workflow_id "$WORKFLOW_ID" \
+  '{message: $message, session_id: $session_id, workflow_id: $workflow_id}')
+
+  curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+    -H "Content-Type: application/json" \
+    -d "$json_payload"
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=chat
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} $PERSONA
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  kubectl delete deploy workload-prod -n prod-tier --ignore-not-found=true || true
+  kubectl delete deploy workload-staging -n staging-tier --ignore-not-found=true || true
+  kubectl delete ns prod-tier staging-tier --ignore-not-found=true || true

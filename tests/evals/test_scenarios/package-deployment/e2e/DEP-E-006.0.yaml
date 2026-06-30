@@ -1,0 +1,61 @@
+id: DEP-E-006.0
+chat-prompt: |
+  Please process a deploy request for media-api in namespace media.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10.
+  Context: namespace missing and cluster admission is slow after a maintenance window.
+  Scenarios:
+  - Deployment target: release `media-api`, namespace `media`, chart `oci://registry-1.docker.io/bitnamicharts/nginx`, requested version `22.6.10`.
+  - Operating context: namespace missing and cluster admission is slow after a maintenance window.
+  - Edge case A: Existing namespace has been deleted and must be recreated safely before deployment.
+  - Edge case B: Admission webhooks are slow, so namespace creation and workload startup may lag.
+  - Edge case C: Cluster events are noisy due to unrelated jobs, making rollout analysis harder.
+  - Constraint 1: Prefer a safe create-namespace path and validate existence before install.
+  - Constraint 2: Do not confuse unrelated event noise with release-specific failures.
+  - Constraint 3: Include post-install workload verification before declaring success.
+  - Additional realism: include fallback logic for transient failures, explicit safety checks before rollout, and rollback criteria if health signals degrade.
+  - Additional realism: assume unstable environment signals (event noise, delayed readiness, partial failures) and require a conservative, auditable deployment plan.
+
+
+
+  Execute the deployment safely using the tools available to you.
+  Prioritize validation, safe rollout sequencing, and rollback readiness for media-api from oci://registry-1.docker.io/bitnamicharts/nginx version 22.6.10.
+
+pre-condition-script: |
+  helm uninstall media-api -n media || true
+  kubectl delete ns media --ignore-not-found=true
+  kubectl wait --for=delete namespace/media --timeout=120s || true
+  if kubectl get namespace media >/dev/null 2>&1; then
+    echo "Expected namespace 'media' to be absent before execution"
+    exit 1
+  fi
+execution-script: |
+  # Legacy chat transport path disabled for direct agent testing:
+  # export CHAT_ENDPOINT=127.0.0.1:8002
+  # SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+  #
+  # echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  # echo CHAT_PROMPT: ${CHAT_PROMPT}
+  # echo SESSION_ID: ${SESSION_ID}
+  #
+  # json_payload=$(jq -n   --arg message "$CHAT_PROMPT"   --arg session_id "$SESSION_ID"   '{message: $message, session_id: $session_id}')
+  #
+  # curl -X POST "${CHAT_ENDPOINT}/chat/send"     -H "Content-Type: application/json"     -d "$json_payload"
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "900"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  if kubectl get ns media >/dev/null 2>&1; then
+    helm uninstall media-api -n media || true
+    helm uninstall media-cache -n media || true
+    kubectl delete resourcequota media-tight-quota -n media --ignore-not-found=true || true
+    kubectl delete resourcequota media-policy-block -n media --ignore-not-found=true || true
+    kubectl delete limitrange media-default-limits -n media --ignore-not-found=true || true
+    kubectl delete configmap media-manual-config -n media --ignore-not-found=true || true
+    kubectl annotate namespace media pod-security.kubernetes.io/enforce- --overwrite || true
+  fi
+  kubectl delete ns media --ignore-not-found=true
+  kubectl wait --for=delete namespace/media --timeout=120s || true

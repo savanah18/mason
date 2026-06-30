@@ -9,35 +9,26 @@ from qwen_agent.tools.base import BaseTool, register_tool
 # Prompt Update Tools
 # ============================================================================
 
-@register_tool('update-base-prompt')
-class OptimizerUpdatePrompt(BaseTool):
+class ReflectivePromptOptimzer():
+    def __init__(self, goal_config_path):
+        self.config_path = config_path
+
+    def update_user_prompt_template():
+        pass
+
     
-    description = 'Update current agent base prompt.'
+
+@register_tool('update-user-prompt')
+class OptimizerUpdateUserPromptTemplate(BaseTool):
+    
+    description = 'Update current agent user prompt template.'
     parameters = [
         {
-            'name': 'repo_name',
+            'name': 'updated prompt',
             'type': 'string',
-            'description': 'Name for the repository (e.g., "stable", "bitnami")',
+            'description': 'Updated prompt',
             'required': True
         },
-        {
-            'name': 'repo_url',
-            'type': 'string',
-            'description': 'Repository URL (e.g., "https://charts.bitnami.com/bitnami")',
-            'required': True
-        },
-        {
-            'name': 'username',
-            'type': 'string',
-            'description': 'Optional: Username for authentication',
-            'required': False
-        },
-        {
-            'name': 'password',
-            'type': 'string',
-            'description': 'Optional: Password for authentication',
-            'required': False
-        }
     ]
 
     def call(self, params: str, **kwargs) -> str:
@@ -46,7 +37,7 @@ class OptimizerUpdatePrompt(BaseTool):
                 args = parse_params(params)
                 client = HelmClient()
                 
-                success = await client.add_repository(
+                result = await client.add_repository(
                     name=args['repo_name'],
                     url=args['repo_url'],
                     username=args.get('username'),
@@ -54,16 +45,7 @@ class OptimizerUpdatePrompt(BaseTool):
                     force_update=True
                 )
                 
-                if success:
-                    return json5.dumps({
-                        'success': True,
-                        'message': f"Repository '{args['repo_name']}' added/updated successfully"
-                    }, ensure_ascii=False)
-                else:
-                    return json5.dumps({
-                        'success': False,
-                        'message': f"Failed to add repository '{args['repo_name']}'"
-                    }, ensure_ascii=False)
+                return json5.dumps(result, ensure_ascii=False)
             except Exception as e:
                 return json5.dumps({
                     'success': False,

@@ -29,7 +29,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ResourceEvent::Modified(resource) => {
                 if let Some(name) = resource.get("metadata").and_then(|m| m.get("name")).and_then(|n| n.as_str()) {
                     let kind = resource.get("kind").and_then(|k| k.as_str()).unwrap_or("Unknown");
-                    info!("Resource changed: {} {}", kind, name);
+                    let namespace = resource.get("metadata").and_then(|m| m.get("namespace")).and_then(|n| n.as_str());
+                    info!("Resource changed: {} {:?}/{:?}", kind, namespace, name);
                     
                     // Chunk and process the changed resource
                     let chunk = chunker.chunk_resources(&[resource]);
@@ -39,10 +40,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             ResourceEvent::Added(resource) => {
-                info!("Resource added: {:?}", resource.get("metadata").and_then(|m| m.get("name")));
+                let kind = resource.get("kind").and_then(|k| k.as_str()).unwrap_or("Unknown");
+                let namespace = resource.get("metadata").and_then(|m| m.get("namespace")).and_then(|n| n.as_str());
+                let name = resource.get("metadata").and_then(|m| m.get("name"));
+                info!("Resource added: {} {:?}/{:?}", kind, namespace, name);
             }
             ResourceEvent::Deleted(resource) => {
-                info!("Resource deleted: {:?}", resource.get("metadata").and_then(|m| m.get("name")));
+                let kind = resource.get("kind").and_then(|k| k.as_str()).unwrap_or("Unknown");
+                let namespace = resource.get("metadata").and_then(|m| m.get("namespace")).and_then(|n| n.as_str());
+                let name = resource.get("metadata").and_then(|m| m.get("name"));
+                info!("Resource deleted: {} {:?}/{:?}", kind, namespace, name);
             }
         }
     }

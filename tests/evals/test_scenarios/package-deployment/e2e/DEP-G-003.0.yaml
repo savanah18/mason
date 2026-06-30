@@ -1,0 +1,25 @@
+id: DEP-G-003.0
+chat-prompt: |
+  Please process a release lifecycle reconciliation for search-api in namespace search-lifecycle.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/postgresql version 18.5.14.
+  Context: the release was previously removed, but namespace-level app metadata remains.
+  Re-establish a clean release while preserving useful metadata and avoiding destructive namespace resets.
+
+pre-condition-script: |
+  kubectl create ns search-lifecycle --dry-run=client -o yaml | kubectl apply -f -
+  helm uninstall search-api -n search-lifecycle || true
+  kubectl create configmap search-release-notes -n search-lifecycle --from-literal=owner=qa --from-literal=stage=lifecycle --dry-run=client -o yaml | kubectl apply -f -
+  helm install search-api oci://registry-1.docker.io/bitnamicharts/postgresql --version 18.5.14 --set global.storageClass=nfs-client -n search-lifecycle
+  helm uninstall search-api -n search-lifecycle || true
+execution-script: |
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "900"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  helm uninstall search-api -n search-lifecycle || true
+  kubectl delete configmap search-release-notes -n search-lifecycle --ignore-not-found=true || true
+  kubectl delete ns search-lifecycle --ignore-not-found=true

@@ -1,0 +1,45 @@
+apiVersion: agents/v1
+kind: Actuators
+metadata:
+  name: chat-actuators
+  labels:
+    app: chat-actuators
+    type: autonomous
+spec:
+  mcp-servers:
+    kubernetes:
+      type: "streamable-http"
+      url: "http://kubernetes-mcp-server:8081/mcp"
+      sse_read_timeout: 30
+    litmuschaos:
+      command: "/app/actions/mcp/servers/litmus-chaos/litmuschaos-mcp-server" 
+      args: []
+      env:
+        CHAOS_CENTER_ENDPOINT: "http://172.25.152.192:32630"
+        LITMUS_PROJECT_ID: "dadfe41f-505e-4023-bcbf-8e3b6033374c"
+        LITMUS_ACCESS_TOKEN: "${LITMUS_ACCESS_TOKEN}"
+    # victoriametrics:
+    #   command: "/app/actions/mcp/servers/victoria-metrics/mcp-victoriametrics"
+    #   args: []
+    #   env:
+    #     VM_INSTANCE_ENTRYPOINT: "http://172.25.152.192:32385"
+    #     VM_INSTANCE_TYPE: "cluster"
+    mcp-time:
+      type: "stdio"
+      args: []
+      command: "/app/actions/mcp/servers/time/mcp-time"
+  builtin-functions:
+  - "helm-template"
+  - "helm-list-releases"
+  - "helm-get-values"
+  - "helm-upgrade"
+  - "helm-rollback"
+  - "helm-test"
+  - "kafka-produce-message"
+  - "resource-collector"
+  - "kubernetes-list-workloads"
+  - "kubernetes-apply-resource-update"
+  - "prompt-optimization-retrieve-workflows"
+  - "prompt-optimization-retrieve-workflow-result"
+  exclude-tools:
+  - kubernetes-nodes_stats_summary

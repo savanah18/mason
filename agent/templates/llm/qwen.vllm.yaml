@@ -1,0 +1,9 @@
+model: /model
+model_server: http://main-vllm-server:8000/v1
+model_type: oai
+generate_cfg:
+  temperature: 0.8
+  top_p: 0.9
+  repetition_penalty: 1.1
+  max_input_tokens: 16384
+  #max_thinking_tokens: 1024

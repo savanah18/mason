@@ -1,0 +1,58 @@
+id: CHAT-AH-A-006.0
+chat-prompt: |
+  Ad-hoc request: diagnose rollout failure for image-checker in namespace image-debug.
+  Identify whether the issue is image pull related, runtime related, or readiness related.
+  Provide the most likely root cause and one safe remediation path.
+  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
+pre-condition-script: |
+  # Pre-condition: invalid image tag should create ImagePullBackOff behavior.
+  kubectl delete ns image-debug --ignore-not-found=true || true
+  kubectl wait --for=delete namespace/image-debug --timeout=120s || true
+  kubectl create ns image-debug
+  kubectl apply -f - <<EOF
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: image-checker
+    namespace: image-debug
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: image-checker
+    template:
+      metadata:
+        labels:
+          app: image-checker
+      spec:
+        containers:
+        - name: app
+          image: nginx:0.0.0-not-real
+  EOF
+  sleep 3
+execution-script: |
+  export CHAT_ENDPOINT=127.0.0.1:8002
+  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+
+  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  echo CHAT_PROMPT: ${CHAT_PROMPT}
+  echo SESSION_ID: ${SESSION_ID}
+
+  json_payload=$(jq -n \
+  --arg message "$CHAT_PROMPT" \
+  --arg session_id "$SESSION_ID" \
+  --arg workflow_id "$WORKFLOW_ID" \
+  '{message: $message, session_id: $session_id, workflow_id: $workflow_id}')
+
+  curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+    -H "Content-Type: application/json" \
+    -d "$json_payload"
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=chat
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} $PERSONA
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  kubectl delete deploy image-checker -n image-debug --ignore-not-found=true || true
+  kubectl delete ns image-debug --ignore-not-found=true || true

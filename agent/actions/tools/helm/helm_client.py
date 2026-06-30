@@ -50,13 +50,37 @@ class HelmRevision:
 class HelmClient:
     """Async wrapper around helm CLI commands."""
 
-    def __init__(self, timeout: int = 30):
+    def __init__(self, timeout: int = 120):
         """Initialize HelmClient.
         
         Args:
-            timeout: Command execution timeout in seconds
+            timeout: Command execution timeout in seconds (default: 120s)
         """
         self.timeout = timeout
+
+    # utils
+    def smart_compress(self, text, buffer=100):
+        """
+        Compresses a string by keeping the start and end, redacting the middle.
+        :param text: The string to compress
+        :param buffer: How many characters to keep on each end (default 100)
+        :return: Compressed string
+        """
+        if not text:
+            return ""
+            
+        # If the text is shorter than both buffers + a small margin for the message
+        # we return the original to avoid making the string longer with the redaction text.
+        if len(text) <= (buffer * 2):
+            return text
+
+        redaction_msg = f"\n...[redacted {len(text) - (buffer * 2)} chars to avoid context bloat]...\n"
+        
+        # Slicing in Python is safe; it won't throw IndexErrors even if buffer > len
+        start = text[:buffer]
+        end = text[-buffer:]
+        
+        return f"{start}{redaction_msg}{end}"
 
     async def _run_helm(
         self, 
@@ -75,6 +99,7 @@ class HelmClient:
         """
         try:
             cmd = ["helm"] + command_args # + ["--output", "json"]
+            print(f"Running {cmd}")
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdin=asyncio.subprocess.PIPE if stdin_data is not None else None,
@@ -88,7 +113,7 @@ class HelmClient:
 
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(input=stdin_bytes),
-                timeout=self.timeout
+                timeout=self.timeout + 60 # add buffer to timeout for command execution and output processing
             )
             
             output = stdout.decode('utf-8', errors='ignore').strip()
@@ -122,6 +147,23 @@ class HelmClient:
                 "error": f"Command timed out after {self.timeout} seconds",
                 "raw_output": ""
             }
+
+    def _build_command_result(
+        self,
+        command_args: List[str],
+        result: Dict[str, Any],
+        success_message: str,
+        failure_message: str,
+    ) -> Dict[str, Any]:
+        try:
+            return {
+                "success": result.get("success", False),
+                "message": success_message if result.get("success", False) else failure_message,
+                "command": ["helm"] + command_args,
+                "output": result.get("output"),
+                "error": result.get("error"),
+                "raw_output": result.get("raw_output", ""),
+            }
         except Exception as e:
             return {
                 "success": False,
@@ -129,6 +171,38 @@ class HelmClient:
                 "error": str(e),
                 "raw_output": ""
             }
+
+    def _stringify_helm_set_value(self, value: Any) -> str:
+        """Convert Python values to Helm-compatible --set string values."""
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if value is None:
+            return "null"
+        return str(value)
+
+    def _flatten_values_for_set(self, prefix: str, value: Any) -> List[str]:
+        """Flatten nested values into Helm --set key=value expressions."""
+        if isinstance(value, dict):
+            flattened: List[str] = []
+            for key, nested_value in value.items():
+                nested_prefix = f"{prefix}.{key}" if prefix else str(key)
+                flattened.extend(self._flatten_values_for_set(nested_prefix, nested_value))
+            return flattened
+
+        if isinstance(value, list):
+            flattened = []
+            for index, nested_value in enumerate(value):
+                nested_prefix = f"{prefix}[{index}]"
+                flattened.extend(self._flatten_values_for_set(nested_prefix, nested_value))
+            return flattened
+
+        return [f"{prefix}={self._stringify_helm_set_value(value)}"]
+
+    def _extend_set_args(self, args: List[str], values: Dict[str, Any]) -> None:
+        """Append recursive --set args for values payload."""
+        for key, value in values.items():
+            for set_expr in self._flatten_values_for_set(str(key), value):
+                args.extend(["--set", set_expr])
 
     async def list_releases(
         self,
@@ -198,24 +272,17 @@ class HelmClient:
             args.extend(["--version", version])
 
         if values:
-            # Create a temporary values file or use --set
-            for key, value in values.items():
-                if isinstance(value, dict):
-                    # Handle nested values
-                    for subkey, subvalue in value.items():
-                        args.extend(["--set", f"{key}.{subkey}={subvalue}"])
-                else:
-                    args.extend(["--set", f"{key}={value}"])
+            self._extend_set_args(args, values)
         
         result = await self._run_helm(args, check_error=False)
         
         if not result["success"]:
             # Template doesn't return JSON, return raw output
             if result["raw_output"]:
-                return result["raw_output"]
+                return self.smart_compress(result["raw_output"])
             raise RuntimeError(f"Failed to render template: {result['error']}")
         
-        return result["raw_output"]
+        return self.smart_compress(result["raw_output"])
 
     async def lint(
         self,
@@ -259,7 +326,7 @@ class HelmClient:
         username: Optional[str] = None,
         password: Optional[str] = None,
         force_update: bool = True
-    ) -> bool:
+    ) -> Dict[str, Any]:
         """Add Helm repository.
         
         Args:
@@ -282,14 +349,19 @@ class HelmClient:
             args.extend(["--password", password])
         
         result = await self._run_helm(args, check_error=False)
-        return result["success"]
+        return self._build_command_result(
+            args,
+            result,
+            success_message=f"Repository '{name}' added/updated successfully",
+            failure_message=f"Failed to add repository '{name}'",
+        )
 
     async def registry_login(
         self,
         registry: str,
         username: str,
         password: str
-    ) -> bool:
+    ) -> Dict[str, Any]:
         """Login to an OCI registry for Helm charts.
         
         Args:
@@ -303,9 +375,14 @@ class HelmClient:
         args = ["registry", "login", registry, "--username", username, "--password-stdin"]
         stdin_data = f"{password}\n"
         result = await self._run_helm(args, check_error=False, stdin_data=stdin_data)
-        return result["success"]
+        return self._build_command_result(
+            args,
+            result,
+            success_message=f"Registry '{registry}' login succeeded",
+            failure_message=f"Registry '{registry}' login failed",
+        )
 
-    async def update_repository(self, name: Optional[str] = None) -> bool:
+    async def update_repository(self, name: Optional[str] = None) -> Dict[str, Any]:
         """Update Helm repository.
         
         Args:
@@ -319,9 +396,15 @@ class HelmClient:
             args.append(name)
         
         result = await self._run_helm(args, check_error=False)
-        return result["success"]
+        target = name or "all repositories"
+        return self._build_command_result(
+            args,
+            result,
+            success_message=f"{target} updated successfully",
+            failure_message="Failed to update repositories",
+        )
 
-    async def remove_repository(self, name: str) -> bool:
+    async def remove_repository(self, name: str) -> Dict[str, Any]:
         """Remove Helm repository.
         
         Args:
@@ -332,7 +415,12 @@ class HelmClient:
         """
         args = ["repo", "remove", name]
         result = await self._run_helm(args, check_error=False)
-        return result["success"]
+        return self._build_command_result(
+            args,
+            result,
+            success_message=f"Repository '{name}' removed successfully",
+            failure_message=f"Failed to remove repository '{name}'",
+        )
 
     async def list_repositories(self) -> List[Dict[str, str]]:
         """List Helm repositories.
@@ -357,7 +445,7 @@ class HelmClient:
         create_namespace: bool = True,
         wait: bool = True,
         version: Optional[str] = None
-    ) -> bool:
+    ) -> Dict[str, Any]:
         """Install Helm chart.
         
         Args:
@@ -380,20 +468,21 @@ class HelmClient:
         
         if wait:
             args.append("--wait")
+            args.extend(["--timeout", f"{self.timeout}s"])
 
         if version:
             args.extend(["--version", version])
         
         if values:
-            for key, value in values.items():
-                if isinstance(value, dict):
-                    for subkey, subvalue in value.items():
-                        args.extend(["--set", f"{key}.{subkey}={subvalue}"])
-                else:
-                    args.extend(["--set", f"{key}={value}"])
+            self._extend_set_args(args, values)
         
         result = await self._run_helm(args, check_error=False)
-        return result["success"]
+        return self._build_command_result(
+            args,
+            result,
+            success_message=f"Release '{release_name}' installed successfully",
+            failure_message=f"Failed to install release '{release_name}'",
+        )
 
     async def upgrade(
         self,
@@ -402,9 +491,8 @@ class HelmClient:
         namespace: str = "default",
         values: Optional[Dict[str, Any]] = None,
         wait: bool = True,
-        install: bool = False,
         version: Optional[str] = None
-    ) -> bool:
+    ) -> Dict[str, Any]:
         """Upgrade Helm release.
         
         Args:
@@ -413,34 +501,35 @@ class HelmClient:
             namespace: Target namespace
             values: Values overrides
             wait: Wait for resources to be ready
-            install: Install if release doesn't exist
             version: Optional chart version (for repo or OCI charts)
+            Uses atomic mode so failed upgrades are rolled back automatically
             
         Returns:
             True if successful
         """
         args = ["upgrade", release_name, chart]
         args.extend(["-n", namespace])
-        
+        args.append("--install")
+        args.append("--rollback-on-failure")
+        args.append("--create-namespace")
+
         if wait:
             args.append("--wait")
+            args.extend(["--timeout", f"{self.timeout}s"])
         
-        if install:
-            args.append("--install")
-
         if version:
             args.extend(["--version", version])
         
         if values:
-            for key, value in values.items():
-                if isinstance(value, dict):
-                    for subkey, subvalue in value.items():
-                        args.extend(["--set", f"{key}.{subkey}={subvalue}"])
-                else:
-                    args.extend(["--set", f"{key}={value}"])
+            self._extend_set_args(args, values)
         
         result = await self._run_helm(args, check_error=True)
-        return result["success"]
+        return self._build_command_result(
+            args,
+            result,
+            success_message=f"Release '{release_name}' upgraded successfully",
+            failure_message=f"Failed to upgrade release '{release_name}'",
+        )
 
     async def get_history(
         self,
@@ -484,7 +573,7 @@ class HelmClient:
         revision: int,
         namespace: str = "default",
         wait: bool = True
-    ) -> bool:
+    ) -> Dict[str, Any]:
         """Rollback to a previous release revision.
         
         Args:
@@ -501,16 +590,22 @@ class HelmClient:
         
         if wait:
             args.append("--wait")
+            args.extend(["--timeout", f"{self.timeout}s"])
         
         result = await self._run_helm(args, check_error=False)
-        return result["success"]
+        return self._build_command_result(
+            args,
+            result,
+            success_message=f"Release '{release_name}' rolled back to revision {revision}",
+            failure_message=f"Failed to rollback release '{release_name}'",
+        )
 
     async def uninstall(
         self,
         release_name: str,
         namespace: str = "default",
         wait: bool = True
-    ) -> bool:
+    ) -> Dict[str, Any]:
         """Uninstall Helm release.
         
         Args:
@@ -525,9 +620,52 @@ class HelmClient:
         
         if wait:
             args.append("--wait")
+            args.extend(["--timeout", f"{self.timeout}s"])
         
         result = await self._run_helm(args, check_error=False)
-        return result["success"]
+        return self._build_command_result(
+            args,
+            result,
+            success_message=f"Release '{release_name}' uninstalled successfully",
+            failure_message=f"Failed to uninstall release '{release_name}'",
+        )
+
+    async def test(
+        self,
+        release_name: str,
+        namespace: str = "default",
+        logs: bool = True,
+        filter_pattern: Optional[str] = None,
+        timeout: str = "120s"
+    ) -> Dict[str, Any]:
+        """Run Helm tests for a release.
+
+        Args:
+            release_name: Release name
+            namespace: Release namespace
+            logs: Include test pod logs in output
+            filter_pattern: Optional regex filter for test hooks
+            timeout: Helm command timeout (default: "120s")
+
+        Returns:
+            Dict with success status and command output
+        """
+        args = ["test", release_name, "-n", namespace]
+
+        if logs:
+            args.append("--logs")
+
+        if filter_pattern:
+            args.extend(["--filter", filter_pattern])
+
+        args.extend(["--timeout", timeout])
+
+        result = await self._run_helm(args, check_error=False)
+        return {
+            "success": result["success"],
+            "error": result["error"],
+            "raw_output": result["raw_output"]
+        }
 
     async def get_values(
         self,
@@ -543,7 +681,7 @@ class HelmClient:
         Returns:
             Values dict
         """
-        args = ["get", "values", release_name, "-n", namespace]
+        args = ["get", "values", release_name,"-a", "-n", namespace]
         args.extend(["--output", "json"])
         
         result = await self._run_helm(args)

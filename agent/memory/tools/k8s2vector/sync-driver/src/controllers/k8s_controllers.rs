@@ -22,7 +22,7 @@ impl K8sResourceCollector {
     }
 
     fn should_exclude_namespace(namespace: Option<&str>) -> bool {
-        matches!(namespace, Some("kube-system") | Some("kube-public") | Some("kube-node-lease"))
+        matches!(namespace, Some("kube-system") | Some("kube-public") | Some("kube-node-lease") |  Some("default") |  Some("nfs-provisioner"))
     }
 
     fn should_exclude_kind(kind: &str) -> bool {

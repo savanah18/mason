@@ -7,8 +7,17 @@ import asyncio
 import json5
 import os
 from typing import Optional, Callable, Any
-from qwen_agent.tools.base import BaseTool, register_tool
+from qwen_agent.tools.base import register_tool
 from .helm_client import HelmClient
+from ..utils.traceability import TRACEABILITY_PARAMS_ADD_ONS, MemoryTraceableTool, ToolExecStatus
+
+
+# EXECUTION_ID_PARAMETER = {
+#     'name': 'execution_id',
+#     'type': 'string',
+#     'description': 'Optional execution ID supplied by the orchestrator for attestation',
+#     'required': False,
+# }
 
 
 def run_async(async_func: Callable) -> Any:
@@ -17,18 +26,14 @@ def run_async(async_func: Callable) -> Any:
     Handles cases where event loop is already running.
     """
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # Event loop already running, use thread executor
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = loop.run_in_executor(pool, asyncio.run, async_func())
-                return future.result()
-        else:
-            # No running loop, use asyncio.run directly
-            return asyncio.run(async_func())
+        asyncio.get_running_loop()
+        # Event loop already running in this thread; execute coroutine in a
+        # separate worker thread and wait for completion synchronously.
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(lambda: asyncio.run(async_func())).result()
     except RuntimeError:
-        # No event loop in this thread, create one
+        # No running event loop in this thread, run directly.
         return asyncio.run(async_func())
 
 
@@ -58,13 +63,25 @@ def parse_params(params) -> dict:
         return {}
 
 
+def parse_bool(value: Any, default: bool = False) -> bool:
+    """Parse a bool from native booleans or common string values."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "y", "on"}
+    return bool(value)
+
+
 # ============================================================================
 # Repository Management Tools
 # ============================================================================
 
 @register_tool('helm-add-repository')
-class HelmAddRepository(BaseTool):
+class HelmAddRepository(MemoryTraceableTool):
     """Add or update a Helm chart repository."""
+    tool_name = "helm-add-repository"
     
     description = 'Add a new Helm chart repository or update existing one. Supports public and private repositories with authentication.'
     parameters = [
@@ -92,45 +109,45 @@ class HelmAddRepository(BaseTool):
             'description': 'Optional: Password for authentication',
             'required': False
         }
-    ]
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
+            args = {}
+            exec_id = None
             try:
                 args = parse_params(params)
+                exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
-                success = await client.add_repository(
+                result = await client.add_repository(
                     name=args['repo_name'],
                     url=args['repo_url'],
                     username=args.get('username'),
                     password=args.get('password'),
                     force_update=True
                 )
-                
-                if success:
-                    return json5.dumps({
-                        'success': True,
-                        'message': f"Repository '{args['repo_name']}' added/updated successfully"
-                    }, ensure_ascii=False)
-                else:
-                    return json5.dumps({
-                        'success': False,
-                        'message': f"Failed to add repository '{args['repo_name']}'"
-                    }, ensure_ascii=False)
+                result['exec_id'] = exec_id
+                status = ToolExecStatus.COMPLETED if result['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
-                return json5.dumps({
-                    'success': False,
-                    'error': str(e)
-                }, ensure_ascii=False)
+                result = {
+                    "success": False,
+                    "error": str(e),
+                    "exec_id": exec_id
+                }
+                if exec_id is not None:
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
+                return json.dumps(result, ensure_ascii=False)
         
         return run_async(_async_call)
 
 
 @register_tool('helm-registry-login')
-class HelmRegistryLogin(BaseTool):
+class HelmRegistryLogin(MemoryTraceableTool):
     """Login to an OCI registry for Helm charts."""
-    
+    tool_name = "helm-registry-login"
     description = 'Login to an OCI registry (e.g., ghcr.io) for Helm chart pulls.'
     parameters = [
         {
@@ -139,63 +156,67 @@ class HelmRegistryLogin(BaseTool):
             'description': 'Registry hostname (e.g., "ghcr.io")',
             'required': True
         },
-        # {
-        #     'name': 'username',
-        #     'type': 'string',
-        #     'description': 'Registry username (defaults to env REGISTRY_USERNAME)',
-        #     'required': False
-        # },
-        # {
-        #     'name': 'password',
-        #     'type': 'string',
-        #     'description': 'Registry password or token (defaults to env REGISTRY_PASSWORD)',
-        #     'required': False
-        # }
-    ]
+        {
+            'name': 'username',
+            'type': 'string',
+            'description': 'Optional: Registry username. Falls back to REGISTRY_USERNAME env var',
+            'required': False
+        },
+        {
+            'name': 'password',
+            'type': 'string',
+            'description': 'Optional: Registry password/token. Falls back to REGISTRY_PASSWORD env var',
+            'required': False
+        },
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
+            args = {}
+            exec_id = None
             try:
                 args = parse_params(params)
+                exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
 
                 username = args.get('username') or os.getenv('REGISTRY_USERNAME')
                 password = args.get('password') or os.getenv('REGISTRY_PASSWORD')
 
                 if not username or not password:
-                    return json5.dumps({
+                    result = {
                         'success': False,
-                        'error': 'Missing registry credentials: set REGISTRY_USERNAME and REGISTRY_PASSWORD or pass username/password'
-                    }, ensure_ascii=False)
+                        'error': 'Missing registry credentials: set REGISTRY_USERNAME and REGISTRY_PASSWORD or pass username/password',
+                        'exec_id': exec_id
+                    }
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
+                    return json.dumps(result, ensure_ascii=False)
                 
-                success = await client.registry_login(
+                result = await client.registry_login(
                     registry=args['registry'],
                     username=username,
                     password=password
                 )
-                
-                if success:
-                    return json5.dumps({
-                        'success': True,
-                        'message': f"Registry '{args['registry']}' login succeeded"
-                    }, ensure_ascii=False)
-                else:
-                    return json5.dumps({
-                        'success': False,
-                        'message': f"Registry '{args['registry']}' login failed"
-                    }, ensure_ascii=False)
+                result['exec_id'] = exec_id
+                status = ToolExecStatus.COMPLETED if result['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
-                return json5.dumps({
+                result = {
                     'success': False,
-                    'error': str(e)
-                }, ensure_ascii=False)
+                    'error': str(e),
+                    'exec_id': exec_id
+                }
+                if exec_id is not None:
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
+                return json.dumps(result, ensure_ascii=False)
         
         return run_async(_async_call)
 
 
 @register_tool('helm-update-repositories')
-class HelmUpdateRepositories(BaseTool):
+class HelmUpdateRepositories(MemoryTraceableTool):
     """Update Helm chart repositories."""
+    tool_name = "helm-update-repositories"
     
     description = 'Update one or all Helm chart repositories to get the latest chart versions.'
     parameters = [
@@ -204,67 +225,79 @@ class HelmUpdateRepositories(BaseTool):
             'type': 'string',
             'description': 'Optional: Specific repository to update. If empty, updates all repositories',
             'required': False
-        }
-    ]
+        },
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
+            args = {}
+            exec_id = None
             try:
                 args = parse_params(params)
+                exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
-                success = await client.update_repository(args.get('repo_name'))
-                
-                if success:
-                    target = args.get('repo_name') or 'all repositories'
-                    return json5.dumps({
-                        'success': True,
-                        'message': f"{target} updated successfully"
-                    }, ensure_ascii=False)
-                else:
-                    return json5.dumps({
-                        'success': False,
-                        'message': f"Failed to update repositories"
-                    }, ensure_ascii=False)
+                result = await client.update_repository(args.get('repo_name'))
+                result['exec_id'] = exec_id
+                status = ToolExecStatus.COMPLETED if result['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
-                return json5.dumps({
+                result = {
                     'success': False,
-                    'error': str(e)
-                }, ensure_ascii=False)
+                    'error': str(e),
+                    'exec_id': exec_id
+                }
+                if exec_id is not None:
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
+                return json.dumps(result, ensure_ascii=False)
         
         return run_async(_async_call)
 
 
 @register_tool('helm-list-repositories')
-class HelmListRepositories(BaseTool):
+class HelmListRepositories(MemoryTraceableTool):
     """List all configured Helm repositories."""
+    tool_name = "helm-list-repositories"
     
     description = 'List all Helm chart repositories currently configured.'
-    parameters = []
+    parameters = TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
+            args = {}
+            exec_id = None
             try:
+                args = parse_params(params)
+                exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 repos = await client.list_repositories()
                 
-                return json5.dumps({
+                result = {
                     'success': True,
                     'repositories': repos,
-                    'count': len(repos)
-                }, ensure_ascii=False)
+                    'count': len(repos),
+                    'exec_id': exec_id
+                }
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
-                return json5.dumps({
+                result = {
                     'success': False,
-                    'error': str(e)
-                }, ensure_ascii=False)
+                    'error': str(e),
+                    'exec_id': exec_id
+                }
+                if exec_id is not None:
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
+                return json.dumps(result, ensure_ascii=False)
         
         return run_async(_async_call)
 
 
 @register_tool('helm-remove-repository')
-class HelmRemoveRepository(BaseTool):
+class HelmRemoveRepository(MemoryTraceableTool):
     """Remove a Helm chart repository."""
+    tool_name = "helm-remove-repository"
     
     description = 'Remove a Helm chart repository from the system.'
     parameters = [
@@ -273,32 +306,32 @@ class HelmRemoveRepository(BaseTool):
             'type': 'string',
             'description': 'Name of the repository to remove',
             'required': True
-        }
-    ]
+        },
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
+            args = {}
+            exec_id = None
             try:
                 args = parse_params(params)
+                exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
-                success = await client.remove_repository(args['repo_name'])
-                
-                if success:
-                    return json5.dumps({
-                        'success': True,
-                        'message': f"Repository '{args['repo_name']}' removed successfully"
-                    }, ensure_ascii=False)
-                else:
-                    return json5.dumps({
-                        'success': False,
-                        'message': f"Failed to remove repository '{args['repo_name']}'"
-                    }, ensure_ascii=False)
+                result = await client.remove_repository(args['repo_name'])
+                result['exec_id'] = exec_id
+                status = ToolExecStatus.COMPLETED if result['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
-                return json5.dumps({
+                result = {
                     'success': False,
-                    'error': str(e)
-                }, ensure_ascii=False)
+                    'error': str(e),
+                    'exec_id': exec_id
+                }
+                if exec_id is not None:
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
+                return json.dumps(result, ensure_ascii=False)
         
         return run_async(_async_call)
 
@@ -308,8 +341,9 @@ class HelmRemoveRepository(BaseTool):
 # ============================================================================
 
 @register_tool('helm-template')
-class HelmTemplate(BaseTool):
+class HelmTemplate(MemoryTraceableTool):
     """Render Helm chart templates without installing."""
+    tool_name = "helm-template"
     
     description = 'Render Helm chart templates to preview manifests without installing. Useful for validation and review.'
     parameters = [
@@ -336,23 +370,20 @@ class HelmTemplate(BaseTool):
             'type': 'string',
             'description': 'Target namespace for rendering (default: "default")',
             'required': False
-        },
-        {
-            'name': 'values',
-            'type': 'string',
-            'description': 'JSON string of values to override (e.g., \'{"replicas": 3, "image": {"tag": "1.2.0"}}\')',
-            'required': False
         }
-    ]
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
+            args = {}
+            exec_id = None
             try:
                 args = parse_params(params)
+                exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
-                values = None
-                if args.get('values'):
+                values = args.get('values')
+                if args.get('values') and not isinstance(values, dict):
                     values = json5.loads(args['values'])
                 
                 manifests = await client.template(
@@ -363,22 +394,30 @@ class HelmTemplate(BaseTool):
                     version=args.get('version')
                 )
                 
-                return json5.dumps({
+                result = {
                     'success': True,
-                    'manifests': manifests
-                }, ensure_ascii=False)
+                    'manifests': manifests,
+                    'exec_id': exec_id
+                }
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
-                return json5.dumps({
+                result = {
                     'success': False,
-                    'error': str(e)
-                }, ensure_ascii=False)
+                    'error': str(e),
+                    'exec_id': exec_id
+                }
+                if exec_id is not None:
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
+                return json.dumps(result, ensure_ascii=False)
         
         return run_async(_async_call)
 
 
 @register_tool('helm-lint')
-class HelmLint(BaseTool):
+class HelmLint(MemoryTraceableTool):
     """Lint a Helm chart for issues."""
+    tool_name = "helm-lint"
     
     description = 'Lint a Helm chart to find issues with structure, values, and templates.'
     parameters = [
@@ -393,13 +432,16 @@ class HelmLint(BaseTool):
             'type': 'string',
             'description': 'Optional chart version for repo or OCI charts',
             'required': False
-        }
-    ]
+        },
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
+            args = {}
+            exec_id = None
             try:
                 args = parse_params(params)
+                exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
                 result = await client.lint(
@@ -407,17 +449,25 @@ class HelmLint(BaseTool):
                     version=args.get('version')
                 )
                 
-                return json5.dumps({
+                output = {
                     'success': result.get('success', False),
                     'errors': result.get('errors', []),
                     'warnings': result.get('warnings', []),
-                    'output': result.get('raw_output', '')
-                }, ensure_ascii=False)
+                    'output': result.get('raw_output', ''),
+                    'exec_id': exec_id
+                }
+                status = ToolExecStatus.COMPLETED if output['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=output)
+                return json.dumps(output, ensure_ascii=False)
             except Exception as e:
-                return json5.dumps({
+                output = {
                     'success': False,
-                    'error': str(e)
-                }, ensure_ascii=False)
+                    'error': str(e),
+                    'exec_id': exec_id
+                }
+                if exec_id is not None:
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+                return json.dumps(output, ensure_ascii=False)
         
         return run_async(_async_call)
 
@@ -427,8 +477,9 @@ class HelmLint(BaseTool):
 # ============================================================================
 
 @register_tool('helm-install')
-class HelmInstall(BaseTool):
+class HelmInstall(MemoryTraceableTool):
     """Install a Helm chart as a release."""
+    tool_name = "helm-install"
     
     description = 'Install a Helm chart in a Kubernetes cluster as a new release.'
     parameters = [
@@ -441,7 +492,7 @@ class HelmInstall(BaseTool):
         {
             'name': 'chart',
             'type': 'string',
-            'description': 'Chart reference (e.g., "bitnami/nginx")',
+            'description': 'Chart reference',
             'required': True
         },
         {
@@ -458,62 +509,54 @@ class HelmInstall(BaseTool):
         },
         {
             'name': 'values',
-            'type': 'string',
-            'description': 'JSON string of custom values (e.g., \'{"replicas": 3, "resources": {"limits": {"cpu": "500m"}}}\')',
+            'type': 'object',
+            'description': 'Map of custom values for the chart. This should be a JSON object with key-value pairs corresponding to the chart\'s values.yaml structure.',
             'required': False
         },
-        {
-            'name': 'create_namespace',
-            'type': 'string',
-            'description': 'Create namespace if it does not exist (true/false, default: true)',
-            'required': False
-        }
-    ]
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
+            args = {}
+            exec_id = None
             try:
                 args = parse_params(params)
+                exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
-                values = None
-                if args.get('values'):
+                values = args.get('values')
+                if args.get('values') and not isinstance(values, dict):
                     values = json5.loads(args['values'])
                 
-                create_ns = args.get('create_namespace', 'true').lower() == 'true'
-                
-                success = await client.install(
+                result = await client.install(
                     release_name=args['release_name'],
                     chart=args['chart'],
                     namespace=args.get('namespace', 'default'),
                     values=values,
-                    create_namespace=create_ns,
                     wait=True,
                     version=args.get('version')
                 )
-                
-                if success:
-                    return json5.dumps({
-                        'success': True,
-                        'message': f"Release '{args['release_name']}' installed successfully"
-                    }, ensure_ascii=False)
-                else:
-                    return json5.dumps({
-                        'success': False,
-                        'message': f"Failed to install release '{args['release_name']}'"
-                    }, ensure_ascii=False)
+                result['exec_id'] = exec_id
+                status = ToolExecStatus.COMPLETED if result['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
-                return json5.dumps({
+                result = {
                     'success': False,
-                    'error': str(e)
-                }, ensure_ascii=False)
+                    'error': str(e),
+                    'exec_id': exec_id
+                }
+                if exec_id is not None:
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
+                return json.dumps(result, ensure_ascii=False)
         
         return run_async(_async_call)
 
 
 @register_tool('helm-upgrade')
-class HelmUpgrade(BaseTool):
+class HelmUpgrade(MemoryTraceableTool):
     """Upgrade an existing Helm release."""
+    tool_name = "helm-upgrade"
     
     description = 'Upgrade an existing Helm release or install it if it does not exist.'
     parameters = [
@@ -526,7 +569,7 @@ class HelmUpgrade(BaseTool):
         {
             'name': 'chart',
             'type': 'string',
-            'description': 'Chart reference (e.g., "bitnami/nginx")',
+            'description': 'Chart reference',
             'required': True
         },
         {
@@ -543,55 +586,46 @@ class HelmUpgrade(BaseTool):
         },
         {
             'name': 'values',
-            'type': 'string',
-            'description': 'JSON string of new values to set',
+            'type': 'object',
+            'description': 'Map of custom values for the chart. This should be a JSON object with key-value pairs corresponding to the chart\'s values.yaml structure.',
             'required': False
         },
-        {
-            'name': 'install',
-            'type': 'string',
-            'description': 'Install if release does not exist (true/false, default: true)',
-            'required': False
-        }
-    ]
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
+            args = {}
+            exec_id = None
             try:
                 args = parse_params(params)
+                exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
-                values = None
-                if args.get('values'):
+                values = args.get('values')
+                if args.get('values') and not isinstance(values, dict):
                     values = json5.loads(args['values'])
                 
-                install_flag = args.get('install', 'true').lower() == 'true'
-                
-                success = await client.upgrade(
+                result = await client.upgrade(
                     release_name=args['release_name'],
                     chart=args['chart'],
                     namespace=args.get('namespace', 'default'),
                     values=values,
                     wait=True,
-                    install=install_flag,
                     version=args.get('version')
                 )
-                
-                if success:
-                    return json5.dumps({
-                        'success': True,
-                        'message': f"Release '{args['release_name']}' upgraded successfully"
-                    }, ensure_ascii=False)
-                else:
-                    return json5.dumps({
-                        'success': False,
-                        'message': f"Failed to upgrade release '{args['release_name']}'"
-                    }, ensure_ascii=False)
+                result['exec_id'] = exec_id
+                status = ToolExecStatus.COMPLETED if result['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
-                return json5.dumps({
+                result = {
                     'success': False,
-                    'error': str(e)
-                }, ensure_ascii=False)
+                    'error': str(e),
+                    'exec_id': exec_id
+                }
+                if exec_id is not None:
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
+                return json.dumps(result, ensure_ascii=False)
         
         return run_async(_async_call)
 
@@ -601,8 +635,9 @@ class HelmUpgrade(BaseTool):
 # ============================================================================
 
 @register_tool('helm-list-releases')
-class HelmListReleases(BaseTool):
+class HelmListReleases(MemoryTraceableTool):
     """List Helm releases."""
+    tool_name = "helm-list-releases"
     
     description = 'List Helm releases in a namespace or across all namespaces.'
     parameters = [
@@ -617,13 +652,16 @@ class HelmListReleases(BaseTool):
             'type': 'string',
             'description': 'List releases from all namespaces (true/false, default: false)',
             'required': False
-        }
-    ]
+        },
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
+            args = {}
+            exec_id = None
             try:
                 args = parse_params(params)
+                exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
                 all_ns = args.get('all_namespaces', 'false').lower() == 'true'
@@ -646,24 +684,31 @@ class HelmListReleases(BaseTool):
                     for r in releases
                 ]
                 
-                return json5.dumps({
+                result = {
                     'success': True,
                     'releases': releases_data,
-                    'count': len(releases_data)
-                }, ensure_ascii=False)
+                    'count': len(releases_data),
+                    'exec_id': exec_id
+                }
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
-                raise(e)
-                return json5.dumps({
+                result = {
                     'success': False,
-                    'error': str(e)
-                }, ensure_ascii=False)
+                    'error': str(e),
+                    'exec_id': exec_id
+                }
+                if exec_id is not None:
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
+                return json.dumps(result, ensure_ascii=False)
         
         return run_async(_async_call)
 
 
 @register_tool('helm-get-history')
-class HelmGetHistory(BaseTool):
+class HelmGetHistory(MemoryTraceableTool):
     """Get release history and revisions."""
+    tool_name = "helm-get-history"
     
     description = 'Get the history of revisions for a Helm release, showing all deployments and changes.'
     parameters = [
@@ -678,13 +723,16 @@ class HelmGetHistory(BaseTool):
             'type': 'string',
             'description': 'Release namespace (default: "default")',
             'required': False
-        }
-    ]
+        },
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
+            args = {}
+            exec_id = None
             try:
                 args = parse_params(params)
+                exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
                 revisions = await client.get_history(
@@ -704,23 +752,31 @@ class HelmGetHistory(BaseTool):
                     for r in revisions
                 ]
                 
-                return json5.dumps({
+                result = {
                     'success': True,
                     'revisions': revisions_data,
-                    'count': len(revisions_data)
-                }, ensure_ascii=False)
+                    'count': len(revisions_data),
+                    'exec_id': exec_id
+                }
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
-                return json5.dumps({
+                result = {
                     'success': False,
-                    'error': str(e)
-                }, ensure_ascii=False)
+                    'error': str(e),
+                    'exec_id': exec_id
+                }
+                if exec_id is not None:
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
+                return json.dumps(result, ensure_ascii=False)
         
         return run_async(_async_call)
 
 
 @register_tool('helm-get-values')
-class HelmGetValues(BaseTool):
+class HelmGetValues(MemoryTraceableTool):
     """Get the values for a Helm release."""
+    tool_name = "helm-get-values"
     
     description = 'Get the current values (merged user and default values) for a deployed Helm release.'
     parameters = [
@@ -735,13 +791,16 @@ class HelmGetValues(BaseTool):
             'type': 'string',
             'description': 'Release namespace (default: "default")',
             'required': False
-        }
-    ]
+        },
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
+            args = {}
+            exec_id = None
             try:
                 args = parse_params(params)
+                exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
                 values = await client.get_values(
@@ -749,15 +808,22 @@ class HelmGetValues(BaseTool):
                     namespace=args.get('namespace', 'default')
                 )
                 
-                return json5.dumps({
+                result = {
                     'success': True,
-                    'values': values
-                }, ensure_ascii=False)
+                    'values': values,
+                    'exec_id': exec_id
+                }
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
-                return json5.dumps({
+                result = {
                     'success': False,
-                    'error': str(e)
-                }, ensure_ascii=False)
+                    'error': str(e),
+                    'exec_id': exec_id
+                }
+                if exec_id is not None:
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
+                return json.dumps(result, ensure_ascii=False)
         
         return run_async(_async_call)
 
@@ -767,8 +833,9 @@ class HelmGetValues(BaseTool):
 # ============================================================================
 
 @register_tool('helm-rollback')
-class HelmRollback(BaseTool):
+class HelmRollback(MemoryTraceableTool):
     """Rollback a Helm release to a previous revision."""
+    tool_name = "helm-rollback"
     
     description = 'Rollback a Helm release to a specific previous revision.'
     parameters = [
@@ -789,44 +856,45 @@ class HelmRollback(BaseTool):
             'type': 'string',
             'description': 'Release namespace (default: "default")',
             'required': False
-        }
-    ]
+        },
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
+            args = {}
+            exec_id = None
             try:
                 args = parse_params(params)
+                exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
-                success = await client.rollback(
+                result = await client.rollback(
                     release_name=args['release_name'],
                     revision=int(args['revision']),
                     namespace=args.get('namespace', 'default'),
                     wait=True
                 )
-                
-                if success:
-                    return json5.dumps({
-                        'success': True,
-                        'message': f"Release '{args['release_name']}' rolled back to revision {args['revision']}"
-                    }, ensure_ascii=False)
-                else:
-                    return json5.dumps({
-                        'success': False,
-                        'message': f"Failed to rollback release '{args['release_name']}'"
-                    }, ensure_ascii=False)
+                result['exec_id'] = exec_id
+                status = ToolExecStatus.COMPLETED if result['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
-                return json5.dumps({
+                result = {
                     'success': False,
-                    'error': str(e)
-                }, ensure_ascii=False)
+                    'error': str(e),
+                    'exec_id': exec_id
+                }
+                if exec_id is not None:
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
+                return json.dumps(result, ensure_ascii=False)
         
         return run_async(_async_call)
 
 
 @register_tool('helm-uninstall')
-class HelmUninstall(BaseTool):
+class HelmUninstall(MemoryTraceableTool):
     """Uninstall a Helm release."""
+    tool_name = "helm-uninstall"
     
     description = 'Uninstall and delete a Helm release from the cluster.'
     parameters = [
@@ -841,35 +909,118 @@ class HelmUninstall(BaseTool):
             'type': 'string',
             'description': 'Release namespace (default: "default")',
             'required': False
-        }
-    ]
+        },
+    ] + TRACEABILITY_PARAMS_ADD_ONS
 
     def call(self, params: str, **kwargs) -> str:
         async def _async_call():
+            args = {}
+            exec_id = None
             try:
                 args = parse_params(params)
+                exec_id = self._pre_call(self.tool_name, args)
                 client = HelmClient()
                 
-                success = await client.uninstall(
+                result = await client.uninstall(
                     release_name=args['release_name'],
                     namespace=args.get('namespace', 'default'),
                     wait=True
                 )
-                
-                if success:
-                    return json5.dumps({
-                        'success': True,
-                        'message': f"Release '{args['release_name']}' uninstalled successfully"
-                    }, ensure_ascii=False)
-                else:
-                    return json5.dumps({
-                        'success': False,
-                        'message': f"Failed to uninstall release '{args['release_name']}'"
-                    }, ensure_ascii=False)
+                result['exec_id'] = exec_id
+                status = ToolExecStatus.COMPLETED if result['success'] else ToolExecStatus.FAILED
+                self._post_call(exec_id, self.tool_name, args, status, result=result)
+                return json.dumps(result, ensure_ascii=False)
             except Exception as e:
-                return json5.dumps({
+                result = {
                     'success': False,
-                    'error': str(e)
-                }, ensure_ascii=False)
+                    'error': str(e),
+                    'exec_id': exec_id
+                }
+                if exec_id is not None:
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=result)
+                return json.dumps(result, ensure_ascii=False)
         
+        return run_async(_async_call)
+
+
+@register_tool('helm-test')
+class HelmTest(MemoryTraceableTool):
+    """Run Helm test hooks for a release."""
+    tool_name = "helm-test"
+
+    description = 'Run Helm tests for a deployed release and optionally include test logs.'
+    parameters = [
+        {
+            'name': 'release_name',
+            'type': 'string',
+            'description': 'Name of the release to test',
+            'required': True
+        },
+        {
+            'name': 'namespace',
+            'type': 'string',
+            'description': 'Release namespace (default: "default")',
+            'required': False
+        },
+        {
+            'name': 'logs',
+            'type': 'string',
+            'description': 'Include test pod logs in output (true/false, default: true)',
+            'required': False
+        },
+        {
+            'name': 'filter',
+            'type': 'string',
+            'description': 'Optional regex filter for selecting specific test hooks',
+            'required': False
+        },
+    ] + TRACEABILITY_PARAMS_ADD_ONS
+
+    def call(self, params: str, **kwargs) -> str:
+        async def _async_call():
+            args = {}
+            exec_id = None
+            try:
+                args = parse_params(params)
+                exec_id = self._pre_call(self.tool_name, args)
+                client = HelmClient()
+
+                include_logs = parse_bool(args.get('logs'), default=True)
+                result = await client.test(
+                    release_name=args['release_name'],
+                    namespace=args.get('namespace', 'default'),
+                    logs=include_logs,
+                    filter_pattern=args.get('filter'),
+                    timeout='120s'
+                )
+
+                if result.get('success'):
+                    output = {
+                        'success': True,
+                        'message': f"Helm tests passed for release '{args['release_name']}'",
+                        'output': result.get('raw_output', ''),
+                        'exec_id': exec_id
+                    }
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.COMPLETED, result=output)
+                    return json.dumps(output, ensure_ascii=False)
+
+                output = {
+                    'success': False,
+                    'message': f"Helm tests failed for release '{args['release_name']}'",
+                    'error': result.get('error', ''),
+                    'output': result.get('raw_output', ''),
+                    'exec_id': exec_id
+                }
+                self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+                return json.dumps(output, ensure_ascii=False)
+            except Exception as e:
+                output = {
+                    'success': False,
+                    'error': str(e),
+                    'exec_id': exec_id
+                }
+                if exec_id is not None:
+                    self._post_call(exec_id, self.tool_name, args, ToolExecStatus.FAILED, result=output)
+                return json.dumps(output, ensure_ascii=False)
+
         return run_async(_async_call)

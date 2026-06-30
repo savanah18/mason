@@ -1,0 +1,31 @@
+id: MOCK-PLAN-066
+chat-prompt: |
+  Given the following environment scenarios.
+  Scenarios:
+  - Deployment target: release `fraud-detector`, namespace `qa`, chart `oci://ghcr.io/acme/charts/fraud-detector`, requested version `1.9.0`.
+  - Operating context: regional failover drill with mixed workload pressure.
+  - Edge case A: Existing release has higher revision but app version drift; rollback history is available but ambiguous.
+  - Edge case B: Mutating webhook injects sidecars unexpectedly, altering resource requests and startup timing.
+  - Edge case C: Upstream dependency endpoint is unstable, causing readiness probe failures after deployment.
+  - Constraint 1: Rollback path should reference helm-get-history and choose safest known-good revision with justification.
+  - Constraint 2: If quotas are tight, plan should stage values overrides that reduce requests before retrying deployment.
+  - Constraint 3: Post-install verification should consider kubernetes-list-workloads readiness mismatches and delayed rollouts.
+  - Additional realism: include fallback logic for transient failures, explicit safety checks before rollout, and rollback criteria if health signals degrade.
+  - Additional realism: assume unstable environment signals (event noise, delayed readiness, partial failures) and require a conservative, auditable deployment plan.
+
+  **IMPORTANT** Do not execute any tools.
+  Instead, provide a recommended plan to safely deploy fraud-detector from oci://ghcr.io/acme/charts/fraud-detector version 1.9.0.
+
+
+pre-condition-script: |
+
+execution-script: |
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  true

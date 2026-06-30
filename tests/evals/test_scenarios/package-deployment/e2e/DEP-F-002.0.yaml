@@ -1,0 +1,21 @@
+id: DEP-F-002.0
+chat-prompt: |
+  Please process a rollback request for billing-worker in namespace finance.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/redis and move from version 25.3.9 back to 25.3.8.
+  Validate release history before rollback and prefer a low-risk execution path.
+
+pre-condition-script: |
+  kubectl create ns finance --dry-run=client -o yaml | kubectl apply -f -
+  helm uninstall billing-worker -n finance || true
+  helm install billing-worker oci://registry-1.docker.io/bitnamicharts/redis --version 25.3.9 --set global.storageClass=nfs-client -n finance
+execution-script: |
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "900"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  helm uninstall billing-worker -n finance || true
+  kubectl delete ns finance --ignore-not-found=true

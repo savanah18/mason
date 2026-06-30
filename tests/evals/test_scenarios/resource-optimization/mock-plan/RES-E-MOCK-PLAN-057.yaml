@@ -1,0 +1,30 @@
+id: RES-E-MOCK-PLAN-057
+chat-prompt: |
+  Given the following environment scenarios.
+  Scenarios:
+  - Optimization target: release `user-review-service`, namespace `qa`.
+  - Operating context: progressive optimization cycle under change freeze.
+  - Edge case A: partial rollout leaves mixed pod generations with inconsistent resource settings.
+  - Edge case B: resource-collector memory series contains spikes from sidecar bursts that can mislead peak estimation.
+  - Edge case C: top pods by CPU differ between 1m and 5m windows, creating ranking ambiguity for high-impact services.
+  - Constraint 1: Plan must gate kubernetes-apply-resource-update on container-level verification and impact rationale.
+  - Constraint 2: Plan must include explicit helm-test execution strategy and 5-minute timeout handling.
+  - Constraint 3: Plan must include namespace event review focused on restarted/terminated signals during test window.
+  - Additional realism: include fallback logic for transient failures, explicit safety checks before applying resource updates, and clear stop conditions when metrics degrade.
+  - Additional realism: assume unstable signals (event noise, delayed readiness, partial failures) and require a conservative, auditable optimization plan.
+
+  **IMPORTANT** Do not execute any tools.
+  Instead, provide a recommended plan to safely optimize resiliency and performance for user-review-service in namespace qa.
+
+pre-condition-script: |
+
+execution-script: |
+  python3 tools/mock_plan_resiliency_kafka_test_runner.py
+expected-execution-time: "1200"
+output-retrieval-script: |
+  PERSONA=resiliency-optimizer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  true

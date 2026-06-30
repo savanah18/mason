@@ -1,0 +1,23 @@
+id: DEP-F-004.0
+chat-prompt: |
+  Please process an install request for cache-layer in namespace infra-shared.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/memcached version 8.3.7.
+  There is an unrelated release already running in the same namespace, so avoid disruptive operations on non-target releases.
+
+pre-condition-script: |
+  kubectl create ns infra-shared --dry-run=client -o yaml | kubectl apply -f -
+  helm uninstall cache-layer -n infra-shared || true
+  helm uninstall infra-probe -n infra-shared || true
+  helm install infra-probe oci://registry-1.docker.io/bitnamicharts/nginx --version 22.6.10 -n infra-shared
+execution-script: |
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "900"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  helm uninstall cache-layer -n infra-shared || true
+  helm uninstall infra-probe -n infra-shared || true
+  kubectl delete ns infra-shared --ignore-not-found=true

@@ -16,3 +16,5 @@ spec:
     topics:
     - chaos.metrics.normal.*
     - chaos.metrics.accelerated.*
+    - tests.normal*
+    - system.resiliency-optimizer

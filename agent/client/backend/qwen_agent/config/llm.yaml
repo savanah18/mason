@@ -1,6 +1,0 @@
-model: Qwen3-4B-Instruct
-model_server: http://localhost:8001/v1 #
-generate_cfg:
-  temperature: 0.8
-  top_p: 0.9
-  repetition_penalty: 1.1

@@ -1,23 +1,72 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { Consumer, SASLOptions } from 'kafkajs';
 
 type ChatMessage = { id: number; sender: 'user' | 'assistant'; text: string };
+type SessionSummary = {
+  session_id: string;
+  timestamp: number;
+  first_user_message?: string | null;
+};
+type ChatHistoryResponse = {
+  session_id: string;
+  messages: Array<{ role: string; content: string }>;
+  created_at: string;
+};
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8002';
-const CHAT_VERSION = '0.4.1';
+const CHAT_VERSION = '0.5.0';
 const CHAT_ENDPOINT = `${BACKEND_URL}/chat/send`;
 const HEALTH_ENDPOINT = `${BACKEND_URL}/health`;
 const CREATE_SESSION_ENDPOINT = `${BACKEND_URL}/session/create`;
+const LATEST_SESSIONS_ENDPOINT = `${BACKEND_URL}/session/latest`;
+const CHAT_HISTORY_ENDPOINT = `${BACKEND_URL}/chat/history`;
 const CLEAR_CHAT_ENDPOINT = `${BACKEND_URL}/chat/clear`;
 const MAX_MESSAGES_IN_UI = 100;
-const REQUEST_TIMEOUT_MS = 180000;
+const REQUEST_TIMEOUT_MS = (() => {
+  const parsed = Number(process.env.AI_CHAT_REQUEST_TIMEOUT_MS ?? '3600000');
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 3600000;
+})();
 const HEALTH_CHECK_TIMEOUT_MS = 5000;
+
+type NotificationLevel = 'info' | 'warning' | 'error';
+
+type NotificationAction = {
+  label: string;
+  ack?: boolean;
+  value?: string;
+};
+
+type KafkaNotificationMessage = {
+  id?: string;
+  level?: string;
+  title?: string;
+  message?: string;
+  actions?: Array<string | NotificationAction>;
+  requires_ack?: boolean;
+};
+
+type NormalizedNotification = {
+  id: string;
+  level: NotificationLevel;
+  title?: string;
+  message: string;
+  actions: NotificationAction[];
+  requiresAck: boolean;
+};
+
+let kafkaSubscriber: KafkaNotificationSubscriber | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   try {
     console.log('[AI Chat] Activating extension');
     vscode.window.showInformationMessage('AI Chat is starting...');
+
+    kafkaSubscriber = new KafkaNotificationSubscriber();
+    void kafkaSubscriber.start().catch(error => {
+      console.error('[AI Chat] Kafka subscriber startup failed:', error);
+    });
 
     const startDisposable = vscode.commands.registerCommand('aiChat.start', () => {
       vscode.window.showInformationMessage('AI Chat Ready');
@@ -27,7 +76,94 @@ export function activate(context: vscode.ExtensionContext): void {
       ChatPanel.createOrShow(context);
     });
 
-    context.subscriptions.push(startDisposable, chatDisposable);
+    const openChatAliasDisposable = vscode.commands.registerCommand('ai.openchat', () => {
+      ChatPanel.createOrShow(context);
+    });
+
+    const openChatAliasDisposable2 = vscode.commands.registerCommand('aichat.openChat', () => {
+      ChatPanel.createOrShow(context);
+    });
+
+    const selectSessionDisposable = vscode.commands.registerCommand('aiChat.selectSession', async () => {
+      await ChatPanel.openSessionPicker(context);
+    });
+
+    const kafkaStatusDisposable = vscode.commands.registerCommand('aiChat.notificationsStatus', () => {
+      const status = kafkaSubscriber?.getStatus() ?? {
+        enabled: false,
+        running: false,
+        brokers: [],
+        topic: '',
+        groupId: '',
+        phase: 'subscriber-not-initialized',
+        receivedCount: 0,
+        lastMessageAt: null,
+        lastError: 'subscriber-not-initialized',
+      };
+
+      const summary = [
+        `enabled=${status.enabled}`,
+        `running=${status.running}`,
+        `phase=${status.phase || '-'}`,
+        `brokers=${status.brokers.join(',') || '-'}`,
+        `topic=${status.topic || '-'}`,
+        `groupId=${status.groupId || '-'}`,
+        `received=${status.receivedCount}`,
+        `lastMessageAt=${status.lastMessageAt ?? '-'}`,
+        `lastError=${status.lastError ?? '-'}`,
+      ].join(' | ');
+
+      vscode.window.showInformationMessage(`AI Chat Kafka status: ${summary}`);
+      console.log('[AI Chat] Kafka status:', status);
+    });
+
+    const kafkaRestartDisposable = vscode.commands.registerCommand('aiChat.notificationsRestart', async () => {
+      if (!kafkaSubscriber) {
+        kafkaSubscriber = new KafkaNotificationSubscriber();
+      }
+
+      try {
+        await kafkaSubscriber.stop();
+      } catch {
+        // Ignore stop errors; start will report status.
+      }
+
+      await kafkaSubscriber.start().catch(error => {
+        console.error('[AI Chat] Kafka subscriber restart failed:', error);
+      });
+
+      const status = kafkaSubscriber.getStatus();
+      const summary = [
+        `enabled=${status.enabled}`,
+        `running=${status.running}`,
+        `phase=${status.phase || '-'}`,
+        `brokers=${status.brokers.join(',') || '-'}`,
+        `topic=${status.topic || '-'}`,
+        `groupId=${status.groupId || '-'}`,
+        `received=${status.receivedCount}`,
+        `lastError=${status.lastError ?? '-'}`,
+      ].join(' | ');
+
+      vscode.window.showInformationMessage(`AI Chat Kafka restarted: ${summary}`);
+      console.log('[AI Chat] Kafka restart status:', status);
+    });
+
+    const testNotificationDisposable = vscode.commands.registerCommand('aiChat.testNotification', async () => {
+      const message = `AI Chat local test notification @ ${new Date().toLocaleTimeString()}`;
+      await vscode.window.showInformationMessage(message);
+      // ChatPanel.pushExternalNotification(message);
+    });
+
+    context.subscriptions.push(
+      startDisposable,
+      chatDisposable,
+      openChatAliasDisposable,
+      openChatAliasDisposable2,
+      selectSessionDisposable,
+      kafkaStatusDisposable,
+      kafkaRestartDisposable,
+      testNotificationDisposable,
+    );
 
     setTimeout(() => {
       try {
@@ -44,12 +180,388 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
+  void kafkaSubscriber?.stop();
+  kafkaSubscriber = undefined;
   ChatPanel.disposeInstance();
+}
+
+class KafkaNotificationSubscriber {
+  private consumer: Consumer | undefined;
+  private running = false;
+  private enabled = false;
+  private brokers: string[] = [];
+  private topic = '';
+  private groupId = '';
+  private phase = 'idle';
+  private receivedCount = 0;
+  private lastMessageAt: string | null = null;
+  private lastError: string | null = null;
+  private readonly seenIds = new Set<string>();
+  private static readonly MAX_SEEN_IDS = 500;
+
+  async start(): Promise<void> {
+    this.phase = 'starting';
+    const config = vscode.workspace.getConfiguration('aiChat.notifications');
+    const enabled = config.get<boolean>('enabled', true);
+    this.enabled = enabled;
+    this.lastError = null;
+    if (!enabled) {
+      this.lastError = 'disabled-by-settings';
+      this.phase = 'disabled';
+      console.log('[AI Chat] Kafka notifications are disabled');
+      vscode.window.showInformationMessage('AI Chat notifications are disabled in settings');
+      return;
+    }
+
+    const brokers = this.parseCsv(config.get<string>('kafkaBrokers', 'localhost:9092'));
+    const topic = config.get<string>('topic', 'ai.notifications')?.trim() ?? 'ai.notifications';
+    const clientId = config.get<string>('clientId', 'ai-chat-vscode')?.trim() ?? 'ai-chat-vscode';
+    const groupId = config.get<string>('groupId', 'ai-chat-vscode')?.trim() ?? 'ai-chat-vscode';
+    this.brokers = brokers;
+    this.topic = topic;
+    this.groupId = groupId;
+    const fromBeginning = config.get<boolean>('fromBeginning', false);
+    const ssl = config.get<boolean>('ssl', false);
+    this.phase = 'config-loaded';
+
+    if (!brokers.length) {
+      this.lastError = 'no-brokers-configured';
+      this.phase = 'invalid-config';
+      vscode.window.showWarningMessage('AI Chat notifications enabled but no Kafka brokers are configured');
+      return;
+    }
+
+    const sasl = this.buildSaslFromConfig(config);
+    let kafkaModule: typeof import('kafkajs');
+    try {
+      kafkaModule = await import('kafkajs');
+    } catch (error) {
+      this.lastError = `kafkajs-load-failed: ${String(error)}`;
+      this.phase = 'module-load-failed';
+      console.warn('[AI Chat] Kafka notifications disabled because kafkajs could not be loaded:', error);
+      vscode.window.showWarningMessage('AI Chat notifications failed: kafkajs module could not be loaded');
+      return;
+    }
+    this.phase = 'module-loaded';
+
+    const kafka = new kafkaModule.Kafka({
+      clientId,
+      brokers,
+      ssl,
+      sasl,
+      logLevel: kafkaModule.logLevel.NOTHING,
+    });
+
+    this.consumer = kafka.consumer({ groupId });
+    this.phase = 'consumer-created';
+    try {
+      this.phase = 'connecting';
+      await this.consumer.connect();
+      this.phase = 'connected';
+      await this.consumer.subscribe({ topic, fromBeginning });
+      this.phase = 'subscribed';
+    } catch (error) {
+      console.error('[AI Chat] Kafka connect/subscribe failed:', error);
+      this.lastError = String(error);
+      this.phase = 'connect-or-subscribe-failed';
+      vscode.window.showWarningMessage(`AI Chat notifications failed to connect to Kafka (${brokers.join(', ')})`);
+      throw error;
+    }
+
+    this.running = true;
+    this.lastError = null;
+    this.phase = 'running';
+    console.log(`[AI Chat] Kafka notifications listener started on topic '${topic}'`);
+    vscode.window.showInformationMessage(`AI Chat notifications listening on ${topic}`);
+
+    await this.consumer.run({
+      eachMessage: async ({ message }) => {
+        if (!this.running) {
+          return;
+        }
+
+        const raw = message.value?.toString('utf-8');
+        if (!raw) {
+          return;
+        }
+
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          console.warn('[AI Chat] Ignoring non-JSON Kafka notification payload');
+          return;
+        }
+
+        const notification = this.normalizeNotification(parsed);
+        if (!notification || this.isDuplicate(notification.id)) {
+          return;
+        }
+
+        this.receivedCount += 1;
+        this.lastMessageAt = new Date().toISOString();
+        this.lastError = null;
+        console.log(`[AI Chat] Kafka message received id=${notification.id} level=${notification.level}`);
+
+        await this.showNotification(notification);
+      },
+    });
+  }
+
+  async stop(): Promise<void> {
+    this.running = false;
+    this.phase = 'stopping';
+    if (!this.consumer) {
+      this.phase = 'stopped';
+      return;
+    }
+
+    try {
+      await this.consumer.disconnect();
+      console.log('[AI Chat] Kafka notifications listener stopped');
+    } catch (error) {
+      console.error('[AI Chat] Failed to stop Kafka listener:', error);
+      this.lastError = String(error);
+    } finally {
+      this.consumer = undefined;
+      this.phase = 'stopped';
+    }
+  }
+
+  getStatus(): {
+    enabled: boolean;
+    running: boolean;
+    brokers: string[];
+    topic: string;
+    groupId: string;
+    phase: string;
+    receivedCount: number;
+    lastMessageAt: string | null;
+    lastError: string | null;
+  } {
+    return {
+      enabled: this.enabled,
+      running: this.running,
+      brokers: this.brokers,
+      topic: this.topic,
+      groupId: this.groupId,
+      phase: this.phase,
+      receivedCount: this.receivedCount,
+      lastMessageAt: this.lastMessageAt,
+      lastError: this.lastError,
+    };
+  }
+
+  private parseCsv(value: string): string[] {
+    return value
+      .split(',')
+      .map(item => item.trim())
+      .filter(Boolean);
+  }
+
+  private buildSaslFromConfig(config: vscode.WorkspaceConfiguration): SASLOptions | undefined {
+    const username = config.get<string>('username', '').trim();
+    const password = config.get<string>('password', '').trim();
+    const mechanism = config.get<string>('saslMechanism', 'plain').trim();
+
+    if (!username || !password) {
+      return undefined;
+    }
+
+    if (mechanism !== 'plain' && mechanism !== 'scram-sha-256' && mechanism !== 'scram-sha-512') {
+      console.warn(`[AI Chat] Unsupported SASL mechanism '${mechanism}', defaulting to plain`);
+      return { mechanism: 'plain', username, password };
+    }
+
+    return { mechanism, username, password } as SASLOptions;
+  }
+
+  private normalizeNotification(payload: unknown): NormalizedNotification | null {
+    if (!payload || typeof payload !== 'object') {
+      return null;
+    }
+
+    const candidate = payload as { notification?: KafkaNotificationMessage } & KafkaNotificationMessage;
+    const source = (candidate.notification && typeof candidate.notification === 'object')
+      ? candidate.notification
+      : candidate;
+
+    if (typeof source.message !== 'string' || !source.message.trim()) {
+      return null;
+    }
+
+    const id = typeof source.id === 'string' && source.id.trim()
+      ? source.id.trim()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const level = this.normalizeLevel(source.level);
+    const actions = this.normalizeActions(source.actions);
+    const requiresAck = Boolean(source.requires_ack);
+
+    if (requiresAck && !actions.some(action => action.ack)) {
+      actions.push({ label: 'Acknowledge', ack: true, value: 'ack' });
+    }
+
+    return {
+      id,
+      level,
+      title: typeof source.title === 'string' ? source.title : undefined,
+      message: source.message.trim(),
+      actions,
+      requiresAck,
+    };
+  }
+
+  private normalizeLevel(level: string | undefined): NotificationLevel {
+    const normalized = (level ?? 'info').toLowerCase();
+    if (normalized === 'error') {
+      return 'error';
+    }
+    if (normalized === 'warning' || normalized === 'warn') {
+      return 'warning';
+    }
+    return 'info';
+  }
+
+  private normalizeActions(actions: Array<string | NotificationAction> | undefined): NotificationAction[] {
+    if (!Array.isArray(actions)) {
+      return [];
+    }
+
+    const normalized: NotificationAction[] = [];
+    for (const action of actions) {
+      if (typeof action === 'string' && action.trim()) {
+        const lowered = action.trim().toLowerCase();
+        normalized.push({
+          label: action.trim(),
+          ack: lowered === 'ack' || lowered === 'acknowledge',
+          value: lowered,
+        });
+        continue;
+      }
+
+      if (
+        action &&
+        typeof action === 'object' &&
+        typeof action.label === 'string' &&
+        action.label.trim()
+      ) {
+        const label = action.label.trim();
+        normalized.push({
+          label,
+          ack: Boolean(action.ack),
+          value: typeof action.value === 'string' ? action.value : label.toLowerCase(),
+        });
+      }
+    }
+
+    return normalized;
+  }
+
+  private isDuplicate(id: string): boolean {
+    if (this.seenIds.has(id)) {
+      return true;
+    }
+
+    this.seenIds.add(id);
+    if (this.seenIds.size > KafkaNotificationSubscriber.MAX_SEEN_IDS) {
+      const [first] = this.seenIds;
+      if (first) {
+        this.seenIds.delete(first);
+      }
+    }
+    return false;
+  }
+
+  private async showNotification(notification: NormalizedNotification): Promise<void> {
+    const toast = notification.title
+      ? `${notification.title}: ${notification.message}`
+      : notification.message;
+
+    const links = this.extractHyperlinks(notification.message);
+    const linkActions = links.map((url, index) => ({
+      label: index === 0 ? 'Open Link' : `Open Link ${index + 1}`,
+      url,
+    }));
+    const actionLabels = [
+      ...notification.actions.map(action => action.label),
+      ...linkActions.map(action => action.label),
+    ];
+
+    let selected: string | undefined;
+    if (notification.level === 'error') {
+      selected = await vscode.window.showErrorMessage(toast, ...actionLabels);
+    } else if (notification.level === 'warning') {
+      selected = await vscode.window.showWarningMessage(toast, ...actionLabels);
+    } else {
+      selected = await vscode.window.showInformationMessage(toast, ...actionLabels);
+    }
+
+    ChatPanel.pushExternalNotification(toast);
+
+    if (!selected) {
+      return;
+    }
+
+    const selectedLinkAction = linkActions.find(action => action.label === selected);
+    if (selectedLinkAction) {
+      await vscode.env.openExternal(vscode.Uri.parse(selectedLinkAction.url));
+      return;
+    }
+
+    const chosen = notification.actions.find(action => action.label === selected);
+    if (!chosen) {
+      return;
+    }
+
+    if (notification.requiresAck || chosen.ack) {
+      await this.sendAck(notification.id, chosen.value ?? selected.toLowerCase());
+    }
+  }
+
+  private extractHyperlinks(text: string): string[] {
+    const matches = text.match(/(?:https?:\/\/|www\.)[^\s<>'"`]+/gi) ?? [];
+    const normalized = matches.map(raw => {
+      const trimmed = raw.replace(/[),.;!?]+$/g, '');
+      return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    });
+    return [...new Set(normalized)];
+  }
+
+  private async sendAck(notificationId: string, action: string): Promise<void> {
+    const ackEndpoint = vscode.workspace
+      .getConfiguration('aiChat.notifications')
+      .get<string>('ackEndpoint', '')
+      .trim();
+
+    if (!ackEndpoint) {
+      return;
+    }
+
+    try {
+      const response = await fetch(ackEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notification_id: notificationId,
+          action,
+          seen_at: new Date().toISOString(),
+        }),
+      });
+
+      if (!response.ok) {
+        console.warn(`[AI Chat] Notification ack failed: HTTP ${response.status}`);
+      }
+    } catch (error) {
+      console.warn('[AI Chat] Notification ack request failed:', error);
+    }
+  }
 }
 
 class ChatPanel {
   private static instance: ChatPanel | undefined;
   private readonly panel: vscode.WebviewPanel;
+  private readonly readyPromise: Promise<void>;
   private webviewReady = false;
   private messages: ChatMessage[] = [
     {
@@ -63,6 +575,7 @@ class ChatPanel {
   private backendReady = false;
   private isLoading = false;
   private sessionId = '';
+  private sessionLabel = 'No session selected';
 
   private constructor(private readonly context: vscode.ExtensionContext) {
     this.panel = vscode.window.createWebviewPanel('aiChat', 'AI Chat', vscode.ViewColumn.Beside, {
@@ -74,7 +587,7 @@ class ChatPanel {
     this.panel.webview.onDidReceiveMessage(msg => this.handleMessage(msg));
     this.panel.webview.html = this.renderHtml();
 
-    this.initialize();
+    this.readyPromise = this.initialize();
   }
 
   static createOrShow(context: vscode.ExtensionContext): void {
@@ -87,6 +600,27 @@ class ChatPanel {
 
   static disposeInstance(): void {
     ChatPanel.instance?.dispose();
+  }
+
+  static async openSessionPicker(context: vscode.ExtensionContext): Promise<void> {
+    if (!ChatPanel.instance) {
+      ChatPanel.createOrShow(context);
+    }
+
+    if (!ChatPanel.instance) {
+      return;
+    }
+
+    await ChatPanel.instance.readyPromise;
+    await ChatPanel.instance.selectSession();
+  }
+
+  static pushExternalNotification(text: string): void {
+    if (!ChatPanel.instance) {
+      return;
+    }
+    ChatPanel.instance.addMessage('assistant', `[Notification] ${text}`);
+    ChatPanel.instance.pushState();
   }
 
   private dispose(): void {
@@ -133,7 +667,7 @@ class ChatPanel {
     } catch (error) {
       this.serverStatus = `Cannot reach ${BACKEND_URL}`;
       this.backendReady = false;
-      this.addMessage('assistant', 'Cannot connect to backend. Start with: python agent/backend.py');
+      this.addMessage('assistant', 'Cannot connect to backend. Please ensure the server is running and accessible.');
     }
   }
 
@@ -144,12 +678,105 @@ class ChatPanel {
       if (response.ok) {
         const data = (await response.json()) as { session_id?: string };
         this.sessionId = data.session_id ?? '';
-        this.addMessage('assistant', `Session: ${this.sessionId.substring(0, 12)}...`);
+        this.sessionLabel = `Active session: ${this.sessionId.substring(0, 12)}...`;
+        this.addMessage('assistant', this.sessionLabel);
+        this.pushState();
       } else {
         throw new Error(`${response.status}`);
       }
     } catch (error) {
       this.addMessage('assistant', `Session error: ${error}`);
+    }
+  }
+
+  private async fetchLatestSessions(offset = 10): Promise<SessionSummary[]> {
+    const url = `${LATEST_SESSIONS_ENDPOINT}?offset=${encodeURIComponent(String(offset))}`;
+    const response = await this.fetchWithTimeout(url, { method: 'GET' }, HEALTH_CHECK_TIMEOUT_MS);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = (await response.json()) as SessionSummary[];
+    return Array.isArray(data) ? data : [];
+  }
+
+  private formatSessionLabel(sessionId: string, firstUserMessage?: string | null): string {
+    const shortId = sessionId.substring(0, 12);
+    if (firstUserMessage && firstUserMessage.trim()) {
+      return `${shortId} • ${firstUserMessage.trim()}`;
+    }
+    return `${shortId}...`;
+  }
+
+  private async loadSession(sessionId: string, preview?: string | null): Promise<void> {
+    if (!sessionId) {
+      return;
+    }
+
+    const response = await this.fetchWithTimeout(`${CHAT_HISTORY_ENDPOINT}/${encodeURIComponent(sessionId)}`, { method: 'GET' }, HEALTH_CHECK_TIMEOUT_MS);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = (await response.json()) as ChatHistoryResponse;
+    const historyMessages = Array.isArray(data.messages)
+      ? data.messages.map((message, index) => ({
+          id: index + 1,
+          sender: (message.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+          text: message.content,
+        }))
+      : [];
+
+    this.sessionId = sessionId;
+    this.sessionLabel = this.formatSessionLabel(sessionId, preview ?? null);
+    this.messages = historyMessages.length > 0
+      ? historyMessages
+      : [{ id: 1, sender: 'assistant', text: 'Selected session is empty.' }];
+    this.nextId = this.messages.length + 1;
+    this.pushState();
+  }
+
+  private async selectSession(): Promise<void> {
+    try {
+      if (!this.backendReady) {
+        await this.checkBackendHealth();
+      }
+
+      if (!this.backendReady) {
+        vscode.window.showWarningMessage('AI Chat backend is not ready.');
+        return;
+      }
+
+      const sessions = await this.fetchLatestSessions(10);
+      if (!sessions.length) {
+        vscode.window.showInformationMessage('No past sessions were found.');
+        return;
+      }
+
+      const picked = await vscode.window.showQuickPick(
+        sessions.map(session => ({
+          label: this.formatSessionLabel(session.session_id, session.first_user_message),
+          description: new Date(session.timestamp * 1000).toLocaleString(),
+          detail: session.session_id,
+          session,
+        })),
+        {
+          placeHolder: 'Select a past AI Chat session',
+          ignoreFocusOut: true,
+        },
+      );
+
+      if (!picked) {
+        return;
+      }
+
+      await this.loadSession(picked.session.session_id, picked.session.first_user_message ?? null);
+      vscode.window.showInformationMessage(`Selected session ${picked.session.session_id.substring(0, 12)}...`);
+    } catch (error) {
+      vscode.window.showErrorMessage(`AI Chat session selection failed: ${error}`);
+      this.addMessage('assistant', `Session selection error: ${error}`);
+      this.pushState();
     }
   }
 
@@ -183,6 +810,11 @@ class ChatPanel {
 
     if (message.action === 'clear-chat') {
       await this.clearChat();
+      return;
+    }
+
+    if (message.action === 'open-sessions') {
+      await this.selectSession();
     }
   }
 

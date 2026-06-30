@@ -1,0 +1,65 @@
+id: CHAT-AH-A-008.0
+chat-prompt: |
+  Ad-hoc request: investigate startup failures for secret-consumer in namespace secret-debug.
+  Determine whether the root cause is a missing secret reference, invalid key, or unrelated container issue.
+  Provide a short remediation plan.
+  If workflow metadata is injected, use workflow_id as <WORKFLOW_ID>
+pre-condition-script: |
+  # Pre-condition: missing Secret should trigger CreateContainerConfigError.
+  kubectl delete ns secret-debug --ignore-not-found=true || true
+  kubectl wait --for=delete namespace/secret-debug --timeout=120s || true
+  kubectl create ns secret-debug
+  kubectl apply -f - <<EOF
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: secret-consumer
+    namespace: secret-debug
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: secret-consumer
+    template:
+      metadata:
+        labels:
+          app: secret-consumer
+      spec:
+        containers:
+        - name: app
+          image: nginx:1.27
+          env:
+          - name: API_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: token
+  EOF
+  sleep 3
+execution-script: |
+  export CHAT_ENDPOINT=127.0.0.1:8002
+  SESSION_ID=$(curl -s -X POST ${CHAT_ENDPOINT}/session/create | jq -r ".session_id")
+
+  echo CHAT_ENDPOINT: ${CHAT_ENDPOINT}
+  echo CHAT_PROMPT: ${CHAT_PROMPT}
+  echo SESSION_ID: ${SESSION_ID}
+
+  json_payload=$(jq -n \
+  --arg message "$CHAT_PROMPT" \
+  --arg session_id "$SESSION_ID" \
+  --arg workflow_id "$WORKFLOW_ID" \
+  '{message: $message, session_id: $session_id, workflow_id: $workflow_id}')
+
+  curl -X POST "${CHAT_ENDPOINT}/chat/send" \
+    -H "Content-Type: application/json" \
+    -d "$json_payload"
+expected-execution-time: "600"
+output-retrieval-script: |
+  PERSONA=chat
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} $PERSONA
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  kubectl delete deploy secret-consumer -n secret-debug --ignore-not-found=true || true
+  kubectl delete secret app-secrets -n secret-debug --ignore-not-found=true || true
+  kubectl delete ns secret-debug --ignore-not-found=true || true

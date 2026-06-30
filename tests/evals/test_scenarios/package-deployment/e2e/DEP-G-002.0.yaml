@@ -1,0 +1,25 @@
+id: DEP-G-002.0
+chat-prompt: |
+  Please process a release lifecycle migration in namespace finance-lifecycle.
+  Decommission legacy release billing-worker-v1 and establish billing-worker-v2.
+  Use OCI registry chart reference oci://registry-1.docker.io/bitnamicharts/redis version 25.3.9.
+  Ensure cutover is safe and no stale release remains active after migration.
+
+pre-condition-script: |
+  kubectl create ns finance-lifecycle --dry-run=client -o yaml | kubectl apply -f -
+  helm uninstall billing-worker-v1 -n finance-lifecycle || true
+  helm uninstall billing-worker-v2 -n finance-lifecycle || true
+  helm install billing-worker-v1 oci://registry-1.docker.io/bitnamicharts/redis --version 25.3.8 --set global.storageClass=nfs-client -n finance-lifecycle
+  helm list -n finance-lifecycle | grep billing-worker-v1 >/dev/null
+execution-script: |
+  python3 tools/mock_plan_kafka_test_runner.py
+expected-execution-time: "900"
+output-retrieval-script: |
+  PERSONA=deployer
+  python3 tools/result_extractor.py ${WORKFLOW_ID} ${EXPECTED_EXEC_TIME_SECONDS} ${PERSONA}
+evaluation-script:
+  echo TODO evaluation script with LLM as a judge
+post-condition-script: |
+  helm uninstall billing-worker-v1 -n finance-lifecycle || true
+  helm uninstall billing-worker-v2 -n finance-lifecycle || true
+  kubectl delete ns finance-lifecycle --ignore-not-found=true
