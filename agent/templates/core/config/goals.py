@@ -61,5 +61,5 @@ class Goal():
         return (datetime.now() - self.updated_at).seconds
 
     def is_timeout(self) -> bool:
-        return self.elapsed_second > self.timeout_seconds
+        return self.elapsed_second() > self.timeout_seconds
 

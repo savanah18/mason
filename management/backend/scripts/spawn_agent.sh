@@ -8,7 +8,12 @@ DRY_RUN="${4:-false}"
 
 CONTAINER_NAME="${PERSONA}-agent"
 IMAGE="agent-generic:latest"
-NETWORK_NAME="newbie-app_triton-ai-network"
+NETWORK_NAME="$(basename "$PROJECT_ROOT")_triton-ai-network"
+HOST_MODEL_CKPT="${HOST_MODEL_CKPT:-/root/workspace/lnd/aiops/vlm/Qwen/Qwen2.5-7B-Instruct}"
+OCI_REGISTRY_SECRET="${OCI_REGISTRY_SECRET:-$PROJECT_ROOT/.secrets/oci-registry}"
+KUBECONFIG_PATH="${KUBECONFIG_PATH:-$HOME/.kube/config}"
+GOOGLE_APP_TOKEN_PATH="${GOOGLE_APP_TOKEN_PATH:-$HOME/.google-app-token}"
+GCLOUD_CONFIG_PATH="${GCLOUD_CONFIG_PATH:-$HOME/.config/gcloud}"
 
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "Image $IMAGE not found. Build agents first (docker compose build deployer-agent)." >&2
@@ -38,17 +43,17 @@ cmd=(
   -e PERSONA="$PERSONA"
   -e EMAIL_NOTIFICATION_ENABLED="${EMAIL_NOTIFICATION_ENABLED:-true}"
   -e EMAIL_APP_PASSWORD_FILE=/run/secrets/google-app-token
-  -v "/root/workspace/lnd/aiops/apps/newbie-app/agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw"
-  -v "/root/workspace/lnd/aiops/apps/newbie-app/agent/personas:/app/personas:rw"
-  -v "/root/workspace/lnd/aiops/apps/newbie-app/agent/templates:/app/templates:rw"
-  -v "/root/workspace/lnd/aiops/apps/newbie-app/agent/actions:/app/actions:rw"
-  -v "/root/workspace/lnd/aiops/apps/newbie-app/agent/memory:/app/memory:rw"
-  -v "/root/workspace/lnd/aiops/apps/newbie-app/agent/notifications:/app/notifications:rw"
-  -v "/root/workspace/lnd/aiops/vlm/Qwen/Qwen2.5-7B-Instruct:/mnt/checkpoint:rw"
-  -v "/root/workspace/lnd/aiops/apps/newbie-app/agent/.secrets/oci-registry:/run/secrets/oci-registry:ro"
-  -v "/root/.kube/config:/run/secrets/kubernetes-config:ro" 
-  -v "/root/.google-app-token:/run/secrets/google-app-token:ro"
-  -v "/root/.config/gcloud:/root/.config/gcloud:rw" 
+  -v "$PROJECT_ROOT/agent/qwen-ops-agent.py:/app/qwen-ops-agent.py:rw"
+  -v "$PROJECT_ROOT/agent/personas:/app/personas:rw"
+  -v "$PROJECT_ROOT/agent/templates:/app/templates:rw"
+  -v "$PROJECT_ROOT/agent/actions:/app/actions:rw"
+  -v "$PROJECT_ROOT/agent/memory:/app/memory:rw"
+  -v "$PROJECT_ROOT/agent/notifications:/app/notifications:rw"
+  -v "$HOST_MODEL_CKPT:/mnt/checkpoint:rw"
+  -v "$OCI_REGISTRY_SECRET:/run/secrets/oci-registry:ro"
+  -v "$KUBECONFIG_PATH:/run/secrets/kubernetes-config:ro"
+  -v "$GOOGLE_APP_TOKEN_PATH:/run/secrets/google-app-token:ro"
+  -v "$GCLOUD_CONFIG_PATH:/root/.config/gcloud:rw"
 )
 
 # if [[ -n "${HOST_MODEL_CKPT:-}" ]] && [[ -e "${HOST_MODEL_CKPT}" ]]; then
