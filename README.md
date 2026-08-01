@@ -10,7 +10,7 @@ MASON (Multi-Agent Harness for Service Orchestration and Optimization) is a mult
 - Supports user-facing workflows through an IDE-based operational interface.
 - Evaluates agent behavior with LLM-as-a-judge scoring and workflow telemetry.
 
-[Watch Demo]("docs/demo/Operation Demo.mp4")
+[Watch Demo]("[docs/demo/Operation Demo.mp4](https://github.com/savanah18/mason/blob/main/docs/demo/Operation%20Demo.mp4)")
 
 ## System Overview
 
